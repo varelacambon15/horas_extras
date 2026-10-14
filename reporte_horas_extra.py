@@ -1,10 +1,17 @@
 """
 Generador de Reporte de Horas Extra
-Solicita reportes de obra uno a uno y genera un Excel con una hoja por reporte.
-Columnas: Trabajador, Ajustero, Sal. Dia, Horas por dia (una col por dia), Total H. Extra, Coste H. Extra
+Lee el reporte de Varias Obras y los reportes de obra (.xlsm) y genera un Excel
+con una hoja Resumen y una hoja por reporte.
+
+Columnas de cada hoja: Trabajador, Ajustero, Supervisor/Tecnico, Oficio, Sal. Dia,
+Coste/Hora, horas extra por dia (una col por dia), Dias quincena trabajados,
+Coste dias / ajuste, Coste H. Extra, Total H. Extra, % H. Extra,
+Coste total quincena, Dias atrasados, Horas extras atrasadas, Atrasos/otros,
+coste total (H. Extra + atrasos) y comentarios.
 """
 
 import sys, re, json, os
+from datetime import datetime
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
@@ -56,210 +63,250 @@ def guardar_configuracion():
 # Lectura de archivos
 # ---------------------------------------------------------------------------
 
-def read_varias_obras(path):
-    """
-    Lee el reporte de Varias Obras.
-    Devuelve: (nombre_hoja, workers, total_coste_obra, total_trabajadores)
-    """
-    df_raw = pd.read_excel(path, header=None)
-    date_row   = df_raw.iloc[0]
-    header_row = df_raw.iloc[1]
+def _num(v):
+    """Convierte a float; vacio / texto / NaN -> 0."""
+    v = pd.to_numeric(v, errors='coerce')
+    return float(v) if pd.notna(v) else 0.0
 
-    # Detectar los bloques por dia: para cada fecha, las posiciones de
-    # ADMIN, AJUSTE, OBRA 1, EXTRA 1, OBRA 2, EXTRA 2
+def _txt(v):
+    return str(v).strip() if pd.notna(v) else ''
+
+def _norm(col):
+    """Normaliza cabeceras: quita saltos de linea, _x000D_ y espacios dobles."""
+    return ' '.join(str(col).replace('_x000D_', ' ').split()).upper()
+
+def _fecha_key(fecha):
+    """Clave de orden cronologico para fechas 'dd-mm-yyyy'."""
+    try:
+        return datetime.strptime(fecha, '%d-%m-%Y')
+    except ValueError:
+        return datetime.max
+
+
+def repartir_atrasos(importe, sal_dia, coste_hora, observaciones):
+    """
+    Reparte el importe de ATRASOS/OTROS del reporte en (dias, horas) de forma
+    que dias * Sal. Dia + horas * Coste/Hora == importe.
+    Los dias se deducen de las observaciones ("domingo", "5 dias"); el resto
+    del importe se convierte en horas extra. Si el texto no habla de dias ni
+    de horas y el importe es multiplo exacto del salario diario, se toma como dias.
+    """
+    if not importe:
+        return None, None
+    obs  = (observaciones or '').lower()
+    dias = obs.count('domingo') + sum(int(n) for n in re.findall(r'(\d+)\s*d[ií]as?\b', obs))
+    if dias and sal_dia and abs(dias * sal_dia) > abs(importe):
+        dias = 0
+    menciona_horas = re.search(r'\d\s*h', obs)
+    if not dias and not menciona_horas and sal_dia and abs(importe) % sal_dia == 0:
+        dias = importe / sal_dia
+    if importe < 0:
+        dias = -abs(dias)
+    resto = importe - dias * sal_dia
+    horas = round(resto / coste_hora, 4) if coste_hora else 0
+    if not coste_hora and resto:
+        # No se puede expresar en horas: se deja todo como dias equivalentes
+        return (importe / sal_dia if sal_dia else None), None
+    return (dias or None), (horas or None)
+
+
+def _worker(nombre, ajustero, tecnico, supervisor, oficio, obra,
+            sal_dia, coste_hora, dias_trab, coste_total, atrasos, obs, days):
+    dias_atr, horas_atr = repartir_atrasos(atrasos, sal_dia, coste_hora, obs)
+    total_e = sum(days.values())
+    return {
+        'TRABAJADOR':     nombre,
+        'AJUSTERO':       ajustero,
+        'TECNICO':        tecnico,
+        'SUPERVISOR':     supervisor,
+        'OFICIO':         oficio,
+        'OBRA':           obra,
+        'SAL. DIA':       sal_dia,
+        'COSTE HORA':     coste_hora,
+        'DIAS':           dias_trab,
+        'COSTE TOTAL':    coste_total,
+        'ATRASOS':        atrasos,
+        'DIAS ATR':       dias_atr,
+        'HORAS ATR':      horas_atr,
+        'COMENTARIOS':    obs,
+        'TOTAL H. EXTRA': total_e,
+        'COSTE H. EXTRA': total_e * coste_hora,
+        '_days':          days,
+    }
+
+
+def _incluir(w):
+    """En las hojas solo aparecen trabajadores con horas extra o con atrasos."""
+    return w['TOTAL H. EXTRA'] > 0 or w['ATRASOS'] != 0
+
+
+def _es_codigo_obra(v):
+    try:
+        return 10000 <= int(v) <= 99999
+    except Exception:
+        return False
+
+
+def _read_formato_diario(path):
+    """
+    Formato del reporte de Varias Obras: fila 1 con las fechas, fila 2 con
+    cabeceras y por cada dia un bloque ADMIN, AJUSTE, OBRA 1, EXTRA 1, OBRA 2, EXTRA 2.
+    Devuelve (workers_todos, coste_total_todos).
+    """
+    raw = pd.read_excel(path, header=None)
+    date_row, header_row = raw.iloc[0], raw.iloc[1]
+
+    cols = {}
+    for i, h in enumerate(header_row):
+        if pd.notna(h):
+            cols.setdefault(_norm(h), i)
+
     day_blocks = []
     last_date  = None
     i = 0
     while i < len(header_row):
-        raw = str(date_row[i]) if pd.notna(date_row[i]) else ''
-        m = re.search(r'(\d{2}-\d{2}-\d{4})', raw)
+        m = re.search(r'(\d{2}-\d{2}-\d{4})', _txt(date_row.iloc[i]))
         if m:
             last_date = m.group(1)
-        h = str(header_row[i]).strip() if pd.notna(header_row[i]) else ''
-        if last_date and h == 'ADMIN':
-            # Bloque tipico: ADMIN, AJUSTE, OBRA 1, EXTRA 1, OBRA 2, EXTRA 2
+        if last_date and _norm(header_row.iloc[i]) == 'ADMIN':
             day_blocks.append({
                 'fecha':  last_date,
-                'admin':  i,
-                'ajuste': i + 1,
-                'obra1':  i + 2,
-                'extra1': i + 3,
-                'obra2':  i + 4,
-                'extra2': i + 5,
+                'admin':  i,     'ajuste': i + 1,
+                'obra1':  i + 2, 'extra1': i + 3,
+                'obra2':  i + 4, 'extra2': i + 5,
             })
             i += 6
         else:
             i += 1
 
-    df = pd.read_excel(path, header=1)
-    df = df.dropna(subset=['OPERARIOS']).copy()
-    df = df[~df['OPERARIOS'].astype(str).str.strip().str.upper().isin(['TOTALES','TOTAL'])]
-
-    sal_col  = 'SAL. DIA'
-    adj_col  = 'AJUSTERO'
-    tot_col  = 'TOTAL HORAS EXTRA'
-    cost_col = 'SAL. HORA'
-
-    df[sal_col]  = pd.to_numeric(df.get(sal_col,  0), errors='coerce').fillna(0)
-    df[tot_col]  = pd.to_numeric(df.get(tot_col,  0), errors='coerce').fillna(0)
-    df[cost_col] = pd.to_numeric(df.get(cost_col, 0), errors='coerce').fillna(0)
-
-    def _es_codigo_obra(v):
-        try:
-            n = int(v)
-            return 10000 <= n <= 99999
-        except Exception:
-            return False
+    def get(row, name):
+        c = cols.get(name)
+        return row.iloc[c] if c is not None else None
 
     workers = []
-    for row_i, (_, row) in enumerate(df.iterrows()):
-        raw_row = df_raw.iloc[row_i + 2]
+    for r in range(2, len(raw)):
+        row    = raw.iloc[r]
+        nombre = _txt(get(row, 'OPERARIOS'))
+        if not nombre or nombre.upper() in ('TOTAL', 'TOTALES'):
+            continue
 
-        # ── Recopilar horas por obra y horas por dia ────────────────────────
-        day_hours   = {}   # fecha -> horas extra del dia
-        obra_hours  = {}   # codigo_obra -> total de horas (regulares + extras)
-        extras_obra = {}   # codigo_obra -> horas EXTRA del trabajador en esa obra
+        day_hours  = {}   # fecha -> horas extra del dia
+        obra_hours = {}   # codigo_obra -> horas (regulares + extras)
+        obra_def   = get(row, 'OBRA')
+        obra_def   = str(int(obra_def)) if _es_codigo_obra(obra_def) else None
 
-        # Obra "por defecto" del trabajador (columna OBRA en el head)
-        obra_default = row.get('OBRA')
-        obra_default_cod = str(int(obra_default)) if _es_codigo_obra(obra_default) else None
-
-        for block in day_blocks:
-            # Dias regulares (admin + ajuste) -> obra por defecto, 8h por dia
-            admin_v  = pd.to_numeric(raw_row.iloc[block['admin']],  errors='coerce') or 0
-            ajuste_v = pd.to_numeric(raw_row.iloc[block['ajuste']], errors='coerce') or 0
-            dias_reg = float(admin_v) + float(ajuste_v)
-            if dias_reg > 0 and obra_default_cod:
-                obra_hours[obra_default_cod] = obra_hours.get(obra_default_cod, 0) + dias_reg * 8
-
-            # Extras en OBRA 1 / OBRA 2
-            for obra_col, extra_col in [(block['obra1'], block['extra1']),
-                                        (block['obra2'], block['extra2'])]:
-                extra_val = pd.to_numeric(raw_row.iloc[extra_col], errors='coerce')
-                if not pd.notna(extra_val) or extra_val <= 0:
+        for b in day_blocks:
+            dias_reg = _num(row.iloc[b['admin']]) + _num(row.iloc[b['ajuste']])
+            if dias_reg > 0 and obra_def:
+                obra_hours[obra_def] = obra_hours.get(obra_def, 0) + dias_reg * 8
+            for oc, ec in ((b['obra1'], b['extra1']), (b['obra2'], b['extra2'])):
+                extra = _num(row.iloc[ec])
+                if extra <= 0:
                     continue
-                day_hours[block['fecha']] = day_hours.get(block['fecha'], 0) + float(extra_val)
-                obra_val = raw_row.iloc[obra_col]
-                if _es_codigo_obra(obra_val):
-                    cod = str(int(obra_val))
-                    obra_hours[cod]  = obra_hours.get(cod, 0)  + float(extra_val)
-                    extras_obra[cod] = extras_obra.get(cod, 0) + float(extra_val)
+                day_hours[b['fecha']] = day_hours.get(b['fecha'], 0) + extra
+                if _es_codigo_obra(row.iloc[oc]):
+                    cod = str(int(row.iloc[oc]))
+                    obra_hours[cod] = obra_hours.get(cod, 0) + extra
 
-        # Top 2 obras por horas (regulares + extras)
         top = sorted(obra_hours.items(), key=lambda x: -x[1])[:2]
-        obra_str = '/'.join(cod for cod, _ in top) if top else ''
 
-        total_e      = row[tot_col]
-        sal_hora     = row[cost_col]
-        coste_e      = total_e * sal_hora
-        # Coste total = IMPORTE TOTAL (bruto, antes de prestamo y deducciones)
-        importe_total = pd.to_numeric(row.get('IMPORTE TOTAL', 0), errors='coerce') or 0
+        workers.append(_worker(
+            nombre      = nombre,
+            ajustero    = _txt(get(row, 'AJUSTERO')).rstrip('*').strip(),
+            tecnico     = _txt(get(row, 'TECNICO OBRA')),
+            supervisor  = '',
+            oficio      = _txt(get(row, 'OFICIO')),
+            obra        = '/'.join(cod for cod, _ in top),
+            sal_dia     = _num(get(row, 'SAL. DIA')),
+            coste_hora  = _num(get(row, 'SAL. HORA')),
+            dias_trab   = _num(get(row, 'TOTAL DIAS TRABAJADOS')),
+            coste_total = _num(get(row, 'IMPORTE TOTAL')),
+            atrasos     = _num(get(row, 'ATRASOS/OTROS')),
+            obs         = _txt(get(row, 'OBSERVACIONES')),
+            days        = day_hours,
+        ))
 
-        if total_e > 0:
-            workers.append({
-                'TRABAJADOR':     str(row['OPERARIOS']).strip(),
-                'AJUSTERO':       str(row.get(adj_col, '')).strip().rstrip('*').strip(),
-                'TECNICO':        str(row.get('TECNICO OBRA', '')).strip(),
-                'SUPERVISOR':     '',
-                'OFICIO':         str(row.get('OFICIO', '')).strip(),
-                'OBRA':           obra_str,
-                'SAL. DIA':       row[sal_col],
-                'COSTE HORA':     sal_hora,
-                'COSTE H. EXTRA': coste_e,
-                'TOTAL H. EXTRA': total_e,
-                'TOTAL A PAGAR':  importe_total,
-                '_days':          day_hours,
-                '_extras_obra':   extras_obra,
-            })
+    return workers, sum(w['COSTE TOTAL'] for w in workers)
 
-    # Total de la obra: suma de IMPORTE TOTAL de todos los trabajadores
-    total_obra         = pd.to_numeric(df.get('IMPORTE TOTAL', 0), errors='coerce').fillna(0).sum()
-    total_trabajadores = len(df)
-    return ('Varias Obras', workers, float(total_obra), total_trabajadores)
+
+def read_varias_obras(path):
+    """Devuelve: (nombre_hoja, workers, total_coste_obra, total_trabajadores)"""
+    todos, total_obra = _read_formato_diario(path)
+    return ('Varias Obras', [w for w in todos if _incluir(w)], float(total_obra), len(todos))
 
 
 def read_obra_xlsm(path, sheet_name):
     """
-    Devuelve: (nombre_hoja=codigo_obra, workers)
-    El nombre de hoja es el codigo extraido del nombre de fichero o de los datos.
+    Reporte de obra (.xlsm, hoja 'Reporte', cabecera en la fila 4).
+    Si el fichero no tiene hoja 'Reporte' se lee con el formato de Varias Obras.
+    Devuelve: (nombre_hoja, workers, total_coste_obra, total_trabajadores)
     """
+    if 'Reporte' not in pd.ExcelFile(path).sheet_names:
+        todos, total_obra = _read_formato_diario(path)
+        for w in todos:
+            w['OBRA'] = ''
+        return (sheet_name, [w for w in todos if _incluir(w)], float(total_obra), len(todos))
+
     df = pd.read_excel(path, header=3, sheet_name='Reporte')
+    df.columns = [_norm(c) for c in df.columns]
     df = df.dropna(subset=['OPERARIOS']).copy()
     df = df[~df['OPERARIOS'].astype(str).str.strip().str.upper().str.startswith('TOTAL')]
 
-    extra_cols = [c for c in df.columns
-                  if 'EXTRA' in str(c) and 'TOTAL' not in str(c) and 'COSTE' not in str(c)]
-
-    # Extraer fecha de cada columna extra (dia y mes pueden venir como
-    # 1 o 2 digitos: "08/07/2026" o "12/7/2026")
+    # Columnas de horas extra por dia: "EXTRA 18/09/2026 (HORAS)"
     date_per_col = {}
-    for col in extra_cols:
-        m = re.search(r'(\d{1,2})/(\d{1,2})/(\d{4})', str(col))
-        if m:
-            d, mo, y = m.groups()
-            date_per_col[col] = f"{int(d):02d}-{int(mo):02d}-{y}"
+    for col in df.columns:
+        if col.startswith('EXTRA'):
+            m = re.search(r'(\d{1,2})/(\d{1,2})/(\d{4})', col)
+            if m:
+                d, mo, y = m.groups()
+                date_per_col[col] = f"{int(d):02d}-{int(mo):02d}-{y}"
 
-    for col in extra_cols:
-        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-
-    sal_col  = 'SALARIO X DIA'
-    adj_col  = 'AJUSTERO'
-    tot_col  = 'TOTAL H. EXTRAS'
-    cost_col = 'COSTE H. EXTRAS'
-
-    df[sal_col]  = pd.to_numeric(df.get(sal_col,  0), errors='coerce').fillna(0)
-    if tot_col in df.columns:
-        df[tot_col] = pd.to_numeric(df[tot_col], errors='coerce').fillna(0)
-    else:
-        df[tot_col] = df[extra_cols].sum(axis=1)
-    if cost_col in df.columns:
-        df[cost_col] = pd.to_numeric(df[cost_col], errors='coerce').fillna(0)
-    else:
-        df[cost_col] = df[tot_col] * (df[sal_col] / 8)
-
-    sup_col  = 'SUPERVISOR'
-    has_sup  = sup_col in df.columns
-
-    # Coste total de la obra (suma de TOTAL A PAGAR de TODOS los trabajadores,
-    # tengan o no horas extra, para poder calcular el % de extras sobre el total)
-    total_obra = pd.to_numeric(df.get('TOTAL A PAGAR', 0), errors='coerce').fillna(0).sum()
-
-    has_oficio = 'OFICIO' in df.columns
+    def get(row, *names):
+        for n in names:
+            if n in row.index:
+                return row[n]
+        return None
 
     workers = []
     for _, row in df.iterrows():
-        total_e = row[tot_col]
-        if total_e <= 0:
-            continue
         day_hours = {}
-        for col, date_str in date_per_col.items():
-            val = row[col]
-            if val > 0:
-                day_hours[date_str] = day_hours.get(date_str, 0) + float(val)
-        sal_dia   = row[sal_col]
-        coste_hora = sal_dia / 8 if sal_dia else 0
-        workers.append({
-            'TRABAJADOR':     str(row['OPERARIOS']).strip(),
-            'AJUSTERO':       str(row.get(adj_col, '')).strip(),
-            'TECNICO':        '',
-            'SUPERVISOR':     str(row[sup_col]).strip() if has_sup else '',
-            'OFICIO':         str(row['OFICIO']).strip() if has_oficio else '',
-            'SAL. DIA':       sal_dia,
-            'COSTE HORA':     coste_hora,
-            'COSTE H. EXTRA': row[cost_col],
-            'TOTAL H. EXTRA': total_e,
-            'TOTAL A PAGAR':  pd.to_numeric(row.get('TOTAL A PAGAR', 0), errors='coerce') or 0,
-            '_days':          day_hours,
-        })
+        for col, fecha in date_per_col.items():
+            v = _num(row[col])
+            if v > 0:
+                day_hours[fecha] = day_hours.get(fecha, 0) + v
 
-    total_trabajadores = len(df)
-    return (sheet_name, workers, float(total_obra), total_trabajadores)
+        sal_dia    = _num(get(row, 'SALARIO X DIA'))
+        coste_hora = _num(get(row, 'COSTE HORAS EXTRA')) or sal_dia / 8
+        atrasos    = _num(get(row, 'ATRASOS/OTROS'))
+        if 'COSTE TOTAL' in row.index:
+            coste_total = _num(row['COSTE TOTAL'])
+        else:
+            coste_total = _num(get(row, 'TOTAL A PAGAR'))
+
+        workers.append(_worker(
+            nombre      = _txt(row['OPERARIOS']),
+            ajustero    = _txt(get(row, 'AJUSTERO')),
+            tecnico     = '',
+            supervisor  = _txt(get(row, 'SUPERVISOR')),
+            oficio      = _txt(get(row, 'OFICIO')),
+            obra        = '',
+            sal_dia     = sal_dia,
+            coste_hora  = coste_hora,
+            dias_trab   = _num(get(row, 'TOTAL DIAS ADMIN')) + _num(get(row, 'TOTAL DIAS AJUSTE')),
+            coste_total = coste_total,
+            atrasos     = atrasos,
+            obs         = _txt(get(row, 'OBSERVACIONES')),
+            days        = day_hours,
+        ))
+
+    total_obra = sum(w['COSTE TOTAL'] for w in workers)
+    return (sheet_name, [w for w in workers if _incluir(w)], float(total_obra), len(workers))
 
 
 def detect_obra_code(path):
-    """Intenta extraer el codigo de obra del nombre del fichero."""
-    name = re.sub(r'[^0-9]', ' ', str(path))
-    nums = [n for n in re.findall(r'\d{5}', name)]
+    """Extrae el codigo de obra (5 digitos exactos) del nombre del fichero."""
+    name = os.path.basename(str(path))
+    nums = re.findall(r'(?<!\d)\d{5}(?!\d)', name)
     return nums[0] if nums else None
 
 
@@ -274,6 +321,11 @@ DAY_BG   = "BDD7EE"   # azul claro para cols de dias
 TOT_BG   = "9DC3E6"   # azul medio para fila total
 ALERT_FG = "C00000"   # rojo intenso para alertas (texto)
 
+FMT_MONEY = '#,##0.00'
+FMT_ACCT  = '_-* #,##0.00_-;\\-* #,##0.00_-;_-* "-"??_-;_-@_-'
+FMT_DEC1  = '0.0'
+FMT_PCT   = '0.0%'
+
 def _brd_outer():
     """Borde exterior completo."""
     s = Side(style='thin', color='999999')
@@ -285,10 +337,6 @@ def _brd_row():
     n = Side(style=None)
     return Border(bottom=b, left=n, right=n, top=n)
 
-def _brd_none():
-    n = Side(style=None)
-    return Border(left=n, right=n, top=n, bottom=n)
-
 def _hdr_font():  return Font(name='Calibri', bold=True, color=HDR_FG, size=10)
 def _hdr_fill():  return PatternFill('solid', start_color=HDR_BG)
 def _day_fill():  return PatternFill('solid', start_color=DAY_BG)
@@ -297,135 +345,146 @@ def _cen():       return Alignment(horizontal='center', vertical='center')
 def _left():      return Alignment(horizontal='left',   vertical='center')
 
 
-# El umbral de alerta ahora se calcula dinamicamente por hoja en write_sheet,
-# en base a la media de horas extra del propio reporte (ver alli).
+TEXT_COLS = ('TRABAJADOR', 'AJUSTERO', 'TECNICO', 'SUPERVISOR', 'OFICIO', 'OBRA', 'COMENTARIOS')
 
-def write_sheet(wb, sheet_name, workers):
+LABELS = {
+    'TRABAJADOR':     'Trabajador',
+    'AJUSTERO':       'Ajustero',
+    'TECNICO':        'Técnico Obra',
+    'SUPERVISOR':     'Supervisor',
+    'OFICIO':         'Oficio',
+    'OBRA':           'Obra',
+    'SAL. DIA':       'Sal. Dia',
+    'COSTE HORA':     'Coste/Hora',
+    'DIAS':           'Dias quincena trabajados',
+    'COSTE DIAS':     'Coste dias / ajuste',
+    'COSTE H. EXTRA': 'Coste H. Extra',
+    'TOTAL H. EXTRA': 'Total H. Extra',
+    '% H. EXTRA':     '% H. Extra',
+    'COSTE TOTAL':    'Coste total quincena',
+    'DIAS ATR':       'Dias atrasados',
+    'HORAS ATR':      'Horas extras atrasadas',
+    'ATRASOS':        'Atrasos/otros',
+    'NOCTURNO':       'Coste nocturno',
+    'FESTIVO':        'Dia festivo',
+    'COSTE FINAL':    'coste total',
+    'COMENTARIOS':    'comentarios',
+}
+
+COL_WIDTHS = {
+    'TRABAJADOR': 30, 'AJUSTERO': 26, 'TECNICO': 18, 'SUPERVISOR': 20, 'OFICIO': 14,
+    'OBRA': 14, 'SAL. DIA': 10, 'COSTE HORA': 11, 'DIAS': 25, 'COSTE DIAS': 22,
+    'COSTE H. EXTRA': 14, 'TOTAL H. EXTRA': 13, '% H. EXTRA': 12, 'COSTE TOTAL': 20,
+    'DIAS ATR': 14, 'HORAS ATR': 21, 'ATRASOS': 16, 'NOCTURNO': 15, 'FESTIVO': 13,
+    'COSTE FINAL': 16, 'COMENTARIOS': 45,
+}
+
+# Columnas que llevan SUM en la fila de totales
+SUM_COLS = ('DIAS', 'COSTE DIAS', 'COSTE H. EXTRA', 'TOTAL H. EXTRA', 'COSTE TOTAL',
+            'ATRASOS', 'NOCTURNO', 'FESTIVO', 'COSTE FINAL')
+
+
+def write_sheet(wb, sheet_name, workers, varias=False):
+    """
+    Escribe la hoja de un reporte. Devuelve la fila de totales (o None si no hay
+    trabajadores) y el mapa columna -> letra, para enlazar desde el Resumen.
+    """
     ws = wb.create_sheet(title=sheet_name[:31])
-    money = '#,##0.00'
-    dec1  = '0.0'
-    pct   = '0.0%'
 
     if not workers:
-        ws['A1'] = 'Sin trabajadores con horas extra'
-        return
+        ws['A1'] = 'Sin trabajadores con horas extra ni atrasos'
+        return None, {}
 
-    all_days  = sorted(set(d for w in workers for d in w['_days']))
-    has_sup   = any(w.get('SUPERVISOR') for w in workers)
-    has_tec   = any(w.get('TECNICO')    for w in workers)
-    has_ofi   = any(w.get('OFICIO')     for w in workers)
-    has_obra  = any(w.get('OBRA')       for w in workers)
-
-    # Umbral dinamico de horas extra (basado en media del propio reporte):
-    #   - al menos 2.3x la media Y al menos 25h por encima de la media
-    horas_lista = [w['TOTAL H. EXTRA'] for w in workers]
-    media       = sum(horas_lista) / len(horas_lista) if horas_lista else 0
-    umbral_h    = max(media * 2.3, media + 25)
-
-    # Umbral dinamico de % H. Extra sobre coste total:
-    #   - al menos 1.5x el % medio Y al menos 10 puntos porcentuales por encima
-    #   - y nunca por debajo del 25% absoluto (mas restrictivo)
-    porcentajes = []
-    for w in workers:
-        if w.get('TOTAL A PAGAR', 0) > 0:
-            porcentajes.append(w['COSTE H. EXTRA'] / w['TOTAL A PAGAR'])
-    media_pct  = sum(porcentajes) / len(porcentajes) if porcentajes else 0
-    umbral_pct = max(media_pct * 1.5, media_pct + 0.10, CONFIG_PORCENTAJE_MINIMO)
+    all_days = sorted({d for w in workers for d in w['_days']}, key=_fecha_key)
 
     fixed = ['TRABAJADOR', 'AJUSTERO']
-    if has_tec:
-        fixed.append('TECNICO')
-    if has_sup:
-        fixed.append('SUPERVISOR')
-    if has_ofi:
-        fixed.append('OFICIO')
-    if has_obra:
-        fixed.append('OBRA')
+    for key in ('TECNICO', 'SUPERVISOR', 'OFICIO', 'OBRA'):
+        if any(w.get(key) for w in workers):
+            fixed.append(key)
     fixed += ['SAL. DIA', 'COSTE HORA']
-    # Cola: costes primero, luego horas, luego %  (horas extras justo antes del %)
-    tail  = ['COSTE TOTAL', 'COSTE H. EXTRA', 'TOTAL H. EXTRA', '% H. EXTRA']
+
+    tail = ['DIAS', 'COSTE DIAS', 'COSTE H. EXTRA', 'TOTAL H. EXTRA', '% H. EXTRA',
+            'COSTE TOTAL', 'DIAS ATR', 'HORAS ATR', 'ATRASOS']
+    if varias:
+        tail += ['NOCTURNO', 'FESTIVO']
+    tail += ['COSTE FINAL', 'COMENTARIOS']
+
     all_cols = fixed + all_days + tail
-    n_cols   = len(all_cols)
+    L = {col: get_column_letter(i) for i, col in enumerate(all_cols, 1)}
+
+    # Umbral dinamico de horas extra (sobre trabajadores con horas extra):
+    #   - al menos 2.3x la media Y al menos 25h por encima de la media
+    con_he     = [w for w in workers if w['TOTAL H. EXTRA'] > 0]
+    horas      = [w['TOTAL H. EXTRA'] for w in con_he]
+    media      = sum(horas) / len(horas) if horas else 0
+    umbral_h   = max(media * 2.3, media + 25)
+
+    # Umbral dinamico de % H. Extra sobre coste total:
+    #   - al menos 1.5x el % medio Y 10 puntos por encima, nunca bajo el minimo
+    pcts       = [w['COSTE H. EXTRA'] / w['COSTE TOTAL'] for w in con_he if w['COSTE TOTAL'] > 0]
+    media_pct  = sum(pcts) / len(pcts) if pcts else 0
+    umbral_pct = max(media_pct * 1.5, media_pct + 0.10, CONFIG_PORCENTAJE_MINIMO)
 
     # ── Fila 1: cabecera ─────────────────────────────────────────────────────
-    LABELS = {
-        'TRABAJADOR':     'Trabajador',
-        'AJUSTERO':       'Ajustero',
-        'TECNICO':        'Técnico Obra',
-        'SUPERVISOR':     'Supervisor',
-        'OFICIO':         'Oficio',
-        'OBRA':           'Obra',
-        'SAL. DIA':       'Sal. Dia',
-        'COSTE HORA':     'Coste/Hora',
-        'TOTAL H. EXTRA': 'Total H. Extra',
-        'COSTE TOTAL':    'Coste Total',
-        'COSTE H. EXTRA': 'Coste H. Extra',
-        '% H. EXTRA':     '% H. Extra',
-    }
-
     for ci, col in enumerate(all_cols, 1):
-        label = LABELS.get(col, col)
-        c = ws.cell(1, ci, label)
-        c.font      = _hdr_font()
+        c = ws.cell(1, ci, LABELS.get(col, col))
         if col in all_days:
             c.fill = _day_fill()
             c.font = Font(name='Calibri', bold=True, color=HDR_BG, size=9)
         else:
             c.fill = _hdr_fill()
+            c.font = _hdr_font()
         c.alignment = _cen()
         c.border    = _brd_outer()
     ws.row_dimensions[1].height = 20
 
     # ── Filas de datos ───────────────────────────────────────────────────────
-    for ri, w in enumerate(workers, 2):
-        total_e        = w['TOTAL H. EXTRA']
-        coste_e        = w['COSTE H. EXTRA']
-        coste_total    = w.get('TOTAL A PAGAR', 0)
-        pct_extra      = (coste_e / coste_total) if coste_total > 0 else 0
+    first_day, last_day = (L[all_days[0]], L[all_days[-1]]) if all_days else (None, None)
 
-        # Doble criterio: muchas horas extra O alto % sobre coste total
-        es_alerta_h    = total_e > umbral_h
-        es_alerta_pct  = pct_extra > umbral_pct and pct_extra > 0
-        es_alerta      = es_alerta_h or es_alerta_pct
+    for r, w in enumerate(workers, 2):
+        coste_total = w['COSTE TOTAL']
+        pct_extra   = (w['COSTE H. EXTRA'] / coste_total) if coste_total > 0 else 0
+        es_alerta   = w['TOTAL H. EXTRA'] > umbral_h or (pct_extra > umbral_pct and pct_extra > 0)
+
+        formulas = {
+            'COSTE DIAS':     f"={L['COSTE TOTAL']}{r}-{L['COSTE H. EXTRA']}{r}",
+            'COSTE H. EXTRA': f"={L['TOTAL H. EXTRA']}{r}*{L['COSTE HORA']}{r}",
+            'TOTAL H. EXTRA': f"=SUM({first_day}{r}:{last_day}{r})" if all_days else 0,
+            '% H. EXTRA':     f"=IFERROR({L['COSTE H. EXTRA']}{r}/{L['COSTE TOTAL']}{r},0)",
+            'ATRASOS':        f"={L['DIAS ATR']}{r}*{L['SAL. DIA']}{r}+{L['COSTE HORA']}{r}*{L['HORAS ATR']}{r}",
+            'COSTE FINAL':    '=' + '+'.join(f"N({L[k]}{r})" for k in
+                                             ('COSTE H. EXTRA', 'ATRASOS', 'NOCTURNO', 'FESTIVO') if k in L),
+        }
 
         for ci, col in enumerate(all_cols, 1):
-            if col in ('TRABAJADOR', 'AJUSTERO', 'TECNICO', 'SUPERVISOR', 'OFICIO', 'OBRA'):
-                val = w.get(col, '')
-            elif col == 'SAL. DIA':
-                val = w['SAL. DIA']
-            elif col == 'COSTE HORA':
-                val = w['COSTE HORA']
-            elif col == 'TOTAL H. EXTRA':
-                val = total_e
-            elif col == 'COSTE TOTAL':
-                val = coste_total
-            elif col == 'COSTE H. EXTRA':
-                val = coste_e
-            elif col == '% H. EXTRA':
-                val = pct_extra
+            if col in formulas:
+                val = formulas[col]
+            elif col in all_days:
+                val = w['_days'].get(col)
+            elif col in ('NOCTURNO', 'FESTIVO'):
+                val = None
             else:
-                val = w['_days'].get(col, '')
+                val = w.get(col)
+            if val == '' or (isinstance(val, float) and val == 0.0 and col in all_days):
+                val = None
 
-            bold  = col in ('TOTAL H. EXTRA', '% H. EXTRA') and es_alerta
+            bold  = (col in ('TOTAL H. EXTRA', '% H. EXTRA') and es_alerta) or col == 'COSTE FINAL'
             color = ALERT_FG if es_alerta else '000000'
-            # Resaltado adicional: celdas individuales de dia con mas de 6h
-            if col in all_days:
-                try:
-                    if float(val) > CONFIG_HORAS_DIA_ALERTA:
-                        color = ALERT_FG
-                        bold  = True
-                except (TypeError, ValueError):
-                    pass
-            c = ws.cell(ri, ci, val if val != 0.0 else '')
+            if col in all_days and val is not None and val > CONFIG_HORAS_DIA_ALERTA:
+                color, bold = ALERT_FG, True
+
+            c = ws.cell(r, ci, val)
             c.font      = Font(name='Calibri', size=10, bold=bold, color=color)
             c.border    = _brd_row()
-            c.alignment = _left() if col in ('TRABAJADOR', 'AJUSTERO', 'TECNICO', 'SUPERVISOR', 'OFICIO') else _cen()
-            if col in ('SAL. DIA', 'COSTE HORA', 'COSTE TOTAL', 'COSTE H. EXTRA'):
-                c.number_format = money
+            c.alignment = _left() if col in TEXT_COLS else _cen()
+            if col in ('SAL. DIA', 'COSTE HORA', 'COSTE H. EXTRA', 'COSTE TOTAL'):
+                c.number_format = FMT_MONEY
+            elif col in ('COSTE DIAS', 'ATRASOS', 'NOCTURNO', 'FESTIVO', 'COSTE FINAL'):
+                c.number_format = FMT_ACCT
             elif col == 'TOTAL H. EXTRA' or col in all_days:
-                c.number_format = dec1
+                c.number_format = FMT_DEC1
             elif col == '% H. EXTRA':
-                c.number_format = pct
+                c.number_format = FMT_PCT
 
     # ── Fila totales ─────────────────────────────────────────────────────────
     last_data = 1 + len(workers)
@@ -436,38 +495,33 @@ def write_sheet(wb, sheet_name, workers):
         c.font      = Font(name='Calibri', bold=True, size=10)
         c.border    = _brd_outer()
         c.alignment = _left() if ci == 1 else _cen()
-        cl = get_column_letter(ci)
+        cl = L[col]
         if ci == 1:
             c.value = 'Total'
-        elif col in all_days or col == 'TOTAL H. EXTRA':
-            c.value         = f'=SUM({cl}2:{cl}{last_data})'
-            c.number_format = dec1
-        elif col in ('COSTE TOTAL', 'COSTE H. EXTRA'):
-            c.value         = f'=SUM({cl}2:{cl}{last_data})'
-            c.number_format = money
+        elif col in all_days or col in SUM_COLS:
+            c.value = f'=SUM({cl}2:{cl}{last_data})'
+            if col in all_days or col == 'TOTAL H. EXTRA':
+                c.number_format = FMT_DEC1
+            elif col in ('COSTE H. EXTRA', 'COSTE TOTAL'):
+                c.number_format = FMT_MONEY
+            elif col != 'DIAS':
+                c.number_format = FMT_ACCT
         elif col == '% H. EXTRA':
-            # % global de la obra
-            col_e = get_column_letter(all_cols.index('COSTE H. EXTRA') + 1)
-            col_t = get_column_letter(all_cols.index('COSTE TOTAL')    + 1)
-            c.value         = f'=IFERROR({col_e}{tr}/{col_t}{tr},0)'
-            c.number_format = pct
+            c.value         = f"=IFERROR({L['COSTE H. EXTRA']}{tr}/{L['COSTE TOTAL']}{tr},0)"
+            c.number_format = FMT_PCT
 
-    # ── Anchos ───────────────────────────────────────────────────────────────
-    col_widths = {
-        'TRABAJADOR': 30, 'AJUSTERO': 26, 'TECNICO': 18, 'SUPERVISOR': 20, 'OFICIO': 14, 'OBRA': 14,
-        'SAL. DIA': 10, 'COSTE HORA': 11,
-        'TOTAL H. EXTRA': 13, 'COSTE TOTAL': 14, 'COSTE H. EXTRA': 14, '% H. EXTRA': 12,
-    }
+    # ── Anchos, filtros y paneles ────────────────────────────────────────────
     for ci, col in enumerate(all_cols, 1):
-        w = col_widths.get(col, 10)
-        ws.column_dimensions[get_column_letter(ci)].width = w
+        ws.column_dimensions[get_column_letter(ci)].width = COL_WIDTHS.get(col, 10)
 
-    # ── Filtros ──────────────────────────────────────────────────────────────
-    # Excluye la fila de totales del filtro
-    last_col_letter = get_column_letter(n_cols)
-    ws.auto_filter.ref = f"A1:{last_col_letter}{last_data}"
-
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(all_cols))}{last_data}"
     ws.freeze_panes = 'A2'
+    return tr, L
+
+
+def _ref(sheet_title, cell):
+    """Referencia a celda de otra hoja: 'Varias Obras'!Y45"""
+    return "'" + sheet_title.replace("'", "''") + "'!" + cell
 
 
 def build_excel(sheets, output_path):
@@ -476,13 +530,13 @@ def build_excel(sheets, output_path):
     wb.remove(wb.active)
 
     # ── Hoja resumen ──────────────────────────────────────────────────────────
-    # Columnas: Obra | Trabajadores | Trab. c/HE | Coste Total | Coste H. Extra | Total H. Extra | %
-    ws_r  = wb.create_sheet('Resumen', 0)
-    money = '#,##0.00'
-    pct   = '0.0%'
+    # Obra | Trabajadores | Trab. con HE | Coste Total | Coste H. Extra + atrasos
+    #      | Total H. Extra | %   — enlazado con las hojas de cada reporte, de
+    # forma que al rellenar atrasos a mano el resumen se actualiza solo.
+    ws_r = wb.create_sheet('Resumen', 0)
 
     headers = ['Obra', 'Trabajadores', 'Trab. con HE', 'Coste Total',
-               'Coste H. Extra', 'Total H. Extra', '% s/Total']
+               'Coste H. Extra + atrasos', 'Total H. Extra', '% s/Total']
     for ci, label in enumerate(headers, 1):
         c = ws_r.cell(1, ci, label)
         c.font      = _hdr_font()
@@ -492,21 +546,26 @@ def build_excel(sheets, output_path):
     ws_r.row_dimensions[1].height = 18
 
     for ri, (sname, workers, coste_total_obra, total_trab) in enumerate(sheets, 2):
-        total_he    = sum(w['TOTAL H. EXTRA'] for w in workers)
-        total_cost  = sum(w['COSTE H. EXTRA'] for w in workers)
-        porcentaje  = (total_cost / coste_total_obra) if coste_total_obra > 0 else 0
+        tr, L = write_sheet(wb, sname, workers, varias=(sname == 'Varias Obras'))
+        title = sname[:31]
+        if tr:
+            last = tr - 1
+            con_he   = f"=COUNTIF({_ref(title, L['TOTAL H. EXTRA'] + '2')}:{L['TOTAL H. EXTRA']}{last},\">0\")"
+            coste_he = '=' + _ref(title, f"{L['COSTE FINAL']}{tr}")
+            total_he = '=' + _ref(title, f"{L['TOTAL H. EXTRA']}{tr}")
+        else:
+            con_he = coste_he = total_he = 0
 
-        valores = [sname, total_trab, len(workers), coste_total_obra,
-                   total_cost, total_he, porcentaje]
+        valores = [sname, total_trab, con_he, coste_total_obra, coste_he, total_he,
+                   f'=IFERROR(E{ri}/D{ri},0)']
         for ci, val in enumerate(valores, 1):
             c = ws_r.cell(ri, ci, val)
             c.font      = Font(name='Calibri', size=10)
             c.border    = _brd_row()
             c.alignment = _left() if ci == 1 else _cen()
-            if ci == 4: c.number_format = money
-            if ci == 5: c.number_format = money
-            if ci == 6: c.number_format = '0.0'
-            if ci == 7: c.number_format = pct
+            if ci in (4, 5): c.number_format = FMT_MONEY
+            if ci == 6:      c.number_format = FMT_DEC1
+            if ci == 7:      c.number_format = FMT_PCT
 
     tr = 1 + len(sheets) + 1
     for ci in range(1, 8):
@@ -516,29 +575,21 @@ def build_excel(sheets, output_path):
         c.border    = _brd_outer()
         c.alignment = _left() if ci == 1 else _cen()
         cl = get_column_letter(ci)
-        if   ci == 1: c.value = 'Total'
-        elif ci == 2: c.value = f'=SUM({cl}2:{cl}{tr-1})'
-        elif ci == 3: c.value = f'=SUM({cl}2:{cl}{tr-1})'
-        elif ci == 4: c.value = f'=SUM({cl}2:{cl}{tr-1})'; c.number_format = money
-        elif ci == 5: c.value = f'=SUM({cl}2:{cl}{tr-1})'; c.number_format = money
-        elif ci == 6: c.value = f'=SUM({cl}2:{cl}{tr-1})'; c.number_format = '0.0'
-        elif ci == 7:
-            # % global = total coste extras / total coste obras
+        if ci == 1:
+            c.value = 'Total'
+        elif ci < 7:
+            c.value = f'=SUM({cl}2:{cl}{tr-1})'
+            if ci in (4, 5): c.number_format = FMT_MONEY
+            if ci == 6:      c.number_format = FMT_DEC1
+        else:
+            # % global = total coste extras + atrasos / total coste obras
             c.value = f'=IFERROR(E{tr}/D{tr},0)'
-            c.number_format = pct
+            c.number_format = FMT_PCT
 
-    ws_r.column_dimensions['A'].width = 22
-    ws_r.column_dimensions['B'].width = 13
-    ws_r.column_dimensions['C'].width = 13
-    ws_r.column_dimensions['D'].width = 16
-    ws_r.column_dimensions['E'].width = 16
-    ws_r.column_dimensions['F'].width = 15
-    ws_r.column_dimensions['G'].width = 12
+    for col, width in zip('ABCDEFG', (22, 13, 13, 16, 24, 15, 12)):
+        ws_r.column_dimensions[col].width = width
     ws_r.auto_filter.ref = f"A1:G{tr-1}"
     ws_r.freeze_panes = 'A2'
-
-    for sname, workers, _, _ in sheets:
-        write_sheet(wb, sname, workers)
 
     wb.save(output_path)
 
