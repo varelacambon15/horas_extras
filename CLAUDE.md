@@ -31,31 +31,32 @@ documento claro, "sin dados ni loterías": que se vea de dónde sale cada cifra 
 con pocas operaciones.
 
 Cada hoja de obra: Trabajador, Ajustero, Supervisor, Oficio, Sal. Dia, Coste/Hora,
-una columna por día con horas extra, y después:
+una columna por día con horas extra, y después (en este orden):
 
 - Dias quincena trabajados: días REALES (un día marcado 2 cuenta como 1).
 - Domingos / Festivos: días pagados doble; se pagan como ordinario.
   En los .xlsm vienen como 2 en ADMIN/AJUSTE; en Varias Obras se deducen del
-  importe de COSTE ADMIN (no vienen marcados por día).
+  importe de COSTE ADMIN (no vienen marcados por día). Solo sale si hay alguno.
 - Coste dias / ajuste: coste ORDINARIO, trasladado de la plantilla (no fórmula).
   .xlsm: COSTE DIAS. Varias Obras: COSTE ADMIN − horas extra + COSTE AJUSTE.
-- Coste H. Extra, Total H. Extra, % H. Extra (= Coste H. Extra / Coste total quincena).
-- Coste total quincena = Coste dias / ajuste + Coste Total
-  (lo que se le carga a la obra de mano de obra; coincide con COSTE TOTAL / IMPORTE TOTAL).
+- Total H. Extra.
+- % H. Extra = Coste H. Extra / (Coste dias / ajuste + Coste H. Extra).
+- Coste H. Extra.
 - Dias atrasados, Horas extras atrasadas: CANTIDADES (días / horas) que se rellenan a mano.
 - Otros: ATRASOS/OTROS trasladado de la plantilla.
 - Total atrasos = Dias atrasados × Sal. Dia + Horas extras atrasadas × Coste/Hora + Otros.
-- Coste Total = Coste H. Extra + Total atrasos.
-- Cabeceras en naranja para las columnas de totales: Coste total quincena,
-  Total atrasos, Coste Total (y Coste atrasos / Coste Total en el Resumen).
+- Coste total quincena = Coste dias / ajuste + Coste H. Extra + Total atrasos
+  (lo que se le carga a la obra; coincide con COSTE TOTAL / IMPORTE TOTAL de la plantilla).
 - comentarios = OBSERVACIONES.
 
+- Cabeceras en naranja: Coste dias / ajuste, Coste H. Extra, Total atrasos,
+  Coste total quincena (y sus equivalentes en el Resumen).
 - Horas y días siempre sin decimales.
 - Aparecen TODOS los trabajadores del reporte (con o sin horas extra / atrasos).
 - Varias Obras lleva además Técnico Obra y Obra.
 - Resumen: Obra | Trabajadores | Trab. con HE | Coste dias quincena (ordinario de
   TODOS los trabajadores) | Coste H. Extra | Total H. Extra | % s/Total
-  (= (HE + atrasos) / Coste Total) | Coste atrasos | Coste Total (Dias + HE + Atrasos).
+  (= HE / (Dias + HE)) | Coste atrasos | Coste Total (Dias + HE + Atrasos).
   Enlazado por fórmula con los totales de cada hoja.
 - Alertas configurables desde el botón Ajustes (por defecto: >5 h en un día y 20 %).
 - Nombre del fichero generado: Reporte_Horas_Extras_Atrasos.xlsx

@@ -5,10 +5,11 @@ con una hoja Resumen y una hoja por reporte.
 
 Columnas de cada hoja: Trabajador, Ajustero, Supervisor/Tecnico, Oficio, Sal. Dia,
 Coste/Hora, horas extra por dia (una col por dia), Dias quincena trabajados (reales),
-Domingos / Festivos (dias pagados doble), Coste dias / ajuste (ordinario, de la plantilla), Coste H. Extra,
-Total H. Extra, % H. Extra, Coste total quincena (= ordinario + coste total),
-Dias atrasados y Horas extras atrasadas (cantidades a mano), Otros (ATRASOS/OTROS
-de la plantilla), Total atrasos, coste total (H. Extra + atrasos) y comentarios.
+Domingos / Festivos (dias pagados doble), Coste dias / ajuste (ordinario, de la
+plantilla), Total H. Extra, % H. Extra (= H. Extra / (dias + H. Extra)),
+Coste H. Extra, Dias atrasados y Horas extras atrasadas (cantidades a mano),
+Otros (ATRASOS/OTROS de la plantilla), Total atrasos,
+Coste total quincena (= dias + H. Extra + atrasos) y comentarios.
 """
 
 import sys, re, json, os
@@ -386,7 +387,6 @@ LABELS = {
     'HORAS ATR':      'Horas extras atrasadas',
     'ATRASOS':        'Otros',
     'TOTAL ATR':      'Total atrasos',
-    'COSTE FINAL':    'Coste Total',
     'COMENTARIOS':    'comentarios',
 }
 
@@ -396,21 +396,27 @@ COL_WIDTHS = {
     'COSTE DIAS': 22,
     'COSTE H. EXTRA': 14, 'TOTAL H. EXTRA': 13, '% H. EXTRA': 12, 'COSTE TOTAL': 20,
     'DIAS ATR': 14, 'HORAS ATR': 21, 'ATRASOS': 16, 'TOTAL ATR': 16,
-    'COSTE FINAL': 18, 'COMENTARIOS': 45,
+    'COMENTARIOS': 45,
 }
 
 # Columnas que reunen totales: cabecera en naranja para distinguirlas
-TOTAL_HDR_COLS = ('COSTE TOTAL', 'TOTAL ATR', 'COSTE FINAL')
+TOTAL_HDR_COLS = ('COSTE DIAS', 'COSTE H. EXTRA', 'TOTAL ATR', 'COSTE TOTAL')
 
 # Columnas que llevan SUM en la fila de totales
 SUM_COLS = ('DIAS', 'DIAS DOBLES', 'COSTE DIAS', 'COSTE H. EXTRA', 'TOTAL H. EXTRA',
-            'COSTE TOTAL', 'DIAS ATR', 'HORAS ATR', 'ATRASOS', 'TOTAL ATR', 'COSTE FINAL')
+            'COSTE TOTAL', 'DIAS ATR', 'HORAS ATR', 'ATRASOS', 'TOTAL ATR')
 
 # Columnas de importes en formato contable (vacias o cero se ven como "-")
-ACCT_COLS = ('COSTE DIAS', 'ATRASOS', 'TOTAL ATR', 'COSTE FINAL')
+ACCT_COLS = ('COSTE DIAS', 'ATRASOS', 'TOTAL ATR')
 
 # Columnas de horas / dias (sin formato decimal)
 NUM_COLS = ('DIAS', 'DIAS DOBLES', 'TOTAL H. EXTRA', 'DIAS ATR', 'HORAS ATR')
+
+
+def _pct_he(w):
+    """% de horas extra sobre lo generado en la quincena (dias + horas extra)."""
+    base = w['COSTE DIAS'] + w['COSTE H. EXTRA']
+    return w['COSTE H. EXTRA'] / base if base > 0 else 0
 
 
 def write_sheet(wb, sheet_name, workers):
@@ -435,9 +441,9 @@ def write_sheet(wb, sheet_name, workers):
     tail = ['DIAS']
     if any(w.get('DIAS DOBLES') for w in workers):
         tail.append('DIAS DOBLES')
-    tail += ['COSTE DIAS', 'COSTE H. EXTRA', 'TOTAL H. EXTRA', '% H. EXTRA',
-            'COSTE TOTAL', 'DIAS ATR', 'HORAS ATR', 'ATRASOS', 'TOTAL ATR',
-            'COSTE FINAL', 'COMENTARIOS']
+    tail += ['COSTE DIAS', 'TOTAL H. EXTRA', '% H. EXTRA', 'COSTE H. EXTRA',
+             'DIAS ATR', 'HORAS ATR', 'ATRASOS', 'TOTAL ATR', 'COSTE TOTAL',
+             'COMENTARIOS']
 
     all_cols = fixed + all_days + tail
     L = {col: get_column_letter(i) for i, col in enumerate(all_cols, 1)}
@@ -451,7 +457,7 @@ def write_sheet(wb, sheet_name, workers):
 
     # Umbral dinamico de % H. Extra sobre coste total:
     #   - al menos 1.5x el % medio Y 10 puntos por encima, nunca bajo el minimo
-    pcts       = [w['COSTE H. EXTRA'] / w['COSTE TOTAL'] for w in con_he if w['COSTE TOTAL'] > 0]
+    pcts       = [_pct_he(w) for w in con_he if w['COSTE DIAS'] + w['COSTE H. EXTRA'] > 0]
     media_pct  = sum(pcts) / len(pcts) if pcts else 0
     umbral_pct = max(media_pct * 1.5, media_pct + 0.10, CONFIG_PORCENTAJE_MINIMO)
 
@@ -472,8 +478,7 @@ def write_sheet(wb, sheet_name, workers):
     first_day, last_day = (L[all_days[0]], L[all_days[-1]]) if all_days else (None, None)
 
     for r, w in enumerate(workers, 2):
-        coste_total = w['COSTE TOTAL']
-        pct_extra   = (w['COSTE H. EXTRA'] / coste_total) if coste_total > 0 else 0
+        pct_extra   = _pct_he(w)
         es_alerta   = w['TOTAL H. EXTRA'] > umbral_h or (pct_extra > umbral_pct and pct_extra > 0)
 
         # Coste dias / ajuste y Otros (ATRASOS/OTROS) se trasladan tal cual de
@@ -483,12 +488,11 @@ def write_sheet(wb, sheet_name, workers):
         formulas = {
             'COSTE H. EXTRA': f"={L['TOTAL H. EXTRA']}{r}*{L['COSTE HORA']}{r}",
             'TOTAL H. EXTRA': f"=SUM({first_day}{r}:{last_day}{r})" if all_days else 0,
-            '% H. EXTRA':     f"=IFERROR({L['COSTE H. EXTRA']}{r}/{L['COSTE TOTAL']}{r},0)",
-            'COSTE TOTAL':    f"={L['COSTE DIAS']}{r}+{L['COSTE FINAL']}{r}",
+            '% H. EXTRA':     f"=IFERROR({L['COSTE H. EXTRA']}{r}/({L['COSTE DIAS']}{r}+{L['COSTE H. EXTRA']}{r}),0)",
+            'COSTE TOTAL':    f"=N({L['COSTE DIAS']}{r})+N({L['COSTE H. EXTRA']}{r})+N({L['TOTAL ATR']}{r})",
             'TOTAL ATR':      (f"=N({L['DIAS ATR']}{r})*{L['SAL. DIA']}{r}"
                                f"+N({L['HORAS ATR']}{r})*{L['COSTE HORA']}{r}"
                                f"+N({L['ATRASOS']}{r})"),
-            'COSTE FINAL':    f"=N({L['COSTE H. EXTRA']}{r})+N({L['TOTAL ATR']}{r})",
         }
 
         for ci, col in enumerate(all_cols, 1):
@@ -503,7 +507,7 @@ def write_sheet(wb, sheet_name, workers):
             if val == '' or (isinstance(val, float) and val == 0.0 and col in all_days):
                 val = None
 
-            bold  = (col in ('TOTAL H. EXTRA', '% H. EXTRA') and es_alerta) or col == 'COSTE FINAL'
+            bold  = (col in ('TOTAL H. EXTRA', '% H. EXTRA') and es_alerta) or col == 'COSTE TOTAL'
             color = ALERT_FG if es_alerta else '000000'
             if col in all_days and val is not None and val > CONFIG_HORAS_DIA_ALERTA:
                 color, bold = ALERT_FG, True
@@ -542,7 +546,7 @@ def write_sheet(wb, sheet_name, workers):
             else:
                 c.number_format = FMT_ACCT
         elif col == '% H. EXTRA':
-            c.value         = f"=IFERROR({L['COSTE H. EXTRA']}{tr}/{L['COSTE TOTAL']}{tr},0)"
+            c.value         = f"=IFERROR({L['COSTE H. EXTRA']}{tr}/({L['COSTE DIAS']}{tr}+{L['COSTE H. EXTRA']}{tr}),0)"
             c.number_format = FMT_PCT
 
     # ── Anchos, filtros y paneles ────────────────────────────────────────────
@@ -579,8 +583,8 @@ def build_excel(sheets, output_path):
     for ci, label in enumerate(headers, 1):
         c = ws_r.cell(1, ci, label)
         c.font      = _hdr_font()
-        # Coste atrasos y Coste Total reunen totales -> naranja
-        c.fill      = _total_hdr_fill() if ci in (8, 9) else _hdr_fill()
+        # Mismas columnas en naranja que en las hojas
+        c.fill      = _total_hdr_fill() if ci in (4, 5, 8, 9) else _hdr_fill()
         c.alignment = _cen()
         c.border    = _brd_outer()
     ws_r.row_dimensions[1].height = 18
@@ -599,7 +603,7 @@ def build_excel(sheets, output_path):
             con_he = coste_he = total_he = atrasos = 0
 
         valores = [sname, total_trab, con_he, coste_dias_obra, coste_he, total_he,
-                   f'=IFERROR((E{ri}+H{ri})/I{ri},0)', atrasos,
+                   f'=IFERROR(E{ri}/(D{ri}+E{ri}),0)', atrasos,
                    f'=D{ri}+E{ri}+H{ri}']
         for ci, val in enumerate(valores, 1):
             c = ws_r.cell(ri, ci, val)
@@ -621,8 +625,8 @@ def build_excel(sheets, output_path):
         if ci == 1:
             c.value = 'Total'
         elif ci == 7:
-            # % global = (coste horas extra + atrasos) / coste total de las obras
-            c.value = f'=IFERROR((E{tr}+H{tr})/I{tr},0)'
+            # % global = coste horas extra / (coste dias + coste horas extra)
+            c.value = f'=IFERROR(E{tr}/(D{tr}+E{tr}),0)'
             c.number_format = FMT_PCT
         else:
             c.value = f'=SUM({cl}2:{cl}{tr-1})'
