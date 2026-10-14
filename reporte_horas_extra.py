@@ -830,8 +830,14 @@ def write_sheet(wb, sheet_name, workers, info=None):
             elif col == 'ATRASOS':
                 # Varios importes citados en el comentario: se ven sumados en la celda
                 otros = w.get('_otros') or []
-                val = ('=' + ''.join(f"{x:+g}" for x in otros).lstrip('+')
-                       if len(otros) > 1 else w['ATRASOS'])
+                # (un termino puede ser texto con {CH} = celda de Coste/Hora de la fila)
+                if any(isinstance(x, str) for x in otros) or len(otros) > 1:
+                    terminos = [x.replace('{CH}', f"{L['COSTE HORA']}{r}") if isinstance(x, str)
+                                else f"{x:+g}" for x in otros]
+                    val = '=' + '+'.join(t.lstrip('+') if i == 0 or t.startswith('-') else t.lstrip('+')
+                                         for i, t in enumerate(terminos)).replace('+-', '-')
+                else:
+                    val = w['ATRASOS']
             elif col in all_days:
                 val = w['_days'].get(col)
             elif col in ('DIAS ATR', 'HORAS ATR'):

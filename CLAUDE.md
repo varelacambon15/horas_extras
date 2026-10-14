@@ -83,6 +83,13 @@ una columna por día con horas extra, y después (en este orden):
 - Nombre del fichero generado: Reporte_Horas_Extras_Atrasos_<quincena>.xlsx
   (los reportes se leen antes de pedir dónde guardar).
 
+## Tarifas del sistema de nómina
+
+- Hora extra domingos y feriados = hora extra L-S × 1,35 (p. ej. 175 → 236,25); el
+  salario diario de domingos y feriados es el doble (1400 → 2800).
+- El "coste nocturno" de Varias Obras sale de horas × 35 % de la hora extra L-S
+  (la diferencia 236,25 − 175 = 61,25 por hora), redondeado al céntimo por hora.
+
 ## Interfaz
 
 - Los archivos se pueden añadir con los botones o arrastrándolos (tkinterdnd2).
