@@ -293,7 +293,7 @@ def _worker(nombre, ajustero, tecnico, supervisor, oficio, obra, sal_dia, coste_
             dias_trab, dias_dobles, coste_dias, coste_total, atrasos, obs, days,
             gratificacion=0.0):
     total_e = sum(days.values())
-    return {
+    w = {
         'TRABAJADOR':     nombre,
         'AJUSTERO':       ajustero,
         'TECNICO':        tecnico,
@@ -311,8 +311,36 @@ def _worker(nombre, ajustero, tecnico, supervisor, oficio, obra, sal_dia, coste_
         'COMENTARIOS':    redactar_comentario(obs),
         'TOTAL H. EXTRA': total_e,
         'COSTE H. EXTRA': total_e * coste_hora,
+        'DIAS ATR':       None,
+        'HORAS ATR':      None,
         '_days':          days,
     }
+    _atrasos_en_dias(w)
+    return w
+
+
+def _atrasos_en_dias(w):
+    """
+    Si el comentario no explica el importe de Otros pero es un numero exacto de
+    dias de salario (p. ej. 2.000 con Sal. Dia 2.000), se pasa a Dias atrasados y
+    se completa el comentario: "Ingresó el 17/09, se suma al cálculo 1 día atrasado."
+    """
+    importe, sal = w['ATRASOS'], w['SAL. DIA']
+    if not importe or importe < 0 or not sal:
+        return
+    if desglose_atrasos(w['COMENTARIOS'], importe, sal, w['COSTE HORA']):
+        return
+    if re.search(r'\d+ h\b', w['COMENTARIOS']):       # habla de horas: no son dias, revisar
+        return
+    n = importe / sal
+    if abs(n - round(n)) > 0.001:
+        return
+    n = int(round(n))
+    w['DIAS ATR'] = n
+    w['ATRASOS']  = 0.0
+    texto = f"se suma al cálculo {n} día{'s' if n != 1 else ''} atrasado{'s' if n != 1 else ''}."
+    base  = w['COMENTARIOS'].rstrip('. ')
+    w['COMENTARIOS'] = f"{base}, {texto}" if base else texto[0].upper() + texto[1:]
 
 
 def genera_coste(w):
@@ -798,7 +826,7 @@ def write_sheet(wb, sheet_name, workers, info=None):
             elif col in all_days:
                 val = w['_days'].get(col)
             elif col in ('DIAS ATR', 'HORAS ATR'):
-                val = None
+                val = w.get(col)
             else:
                 val = w.get(col)
             if val == '' or (isinstance(val, float) and val == 0.0 and col in all_days):
