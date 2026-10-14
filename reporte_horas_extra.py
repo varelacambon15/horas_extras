@@ -896,10 +896,10 @@ class App(tk.Tk):
             return
 
         output = filedialog.asksaveasfilename(
-            title="Guardar informe de horas extra como…",
+            title="Guardar informe de horas extra y atrasos como…",
             defaultextension=".xlsx",
             filetypes=[("Excel", "*.xlsx")],
-            initialfile="Reporte_Horas_Extra.xlsx")
+            initialfile="Reporte_Horas_Extras_Atrasos.xlsx")
         if not output:
             return
 
