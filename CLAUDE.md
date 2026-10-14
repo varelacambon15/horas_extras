@@ -59,7 +59,14 @@ una columna por día con horas extra, y después (en este orden):
   (= HE / (Dias + HE)) | Coste atrasos | Coste Total (Dias + HE + Atrasos).
   Enlazado por fórmula con los totales de cada hoja.
 - Alertas configurables desde el botón Ajustes (por defecto: >5 h en un día y 20 %).
-- Nombre del fichero generado: Reporte_Horas_Extras_Atrasos.xlsx
+- Hojas: todos los días de la quincena, con día de la semana ("Vie 18/09"); domingos y
+  festivos en gris (domingo, festivo fijo de RD o algún "2" ese día en el .xlsm).
+- Cada cabecera lleva una nota con su explicación (diccionarios NOTAS / NOTAS_RESUMEN),
+  y la hoja "Leyenda" explica columnas y colores.
+- Resumen con título de la quincena (p. ej. "2Q Septiembre 2026") y fechas; la
+  quincena es la del mes del día central del periodo (1Q si día <= 15).
+- Nombre del fichero generado: Reporte_Horas_Extras_Atrasos_<quincena>.xlsx
+  (los reportes se leen antes de pedir dónde guardar).
 
 ## Interfaz
 

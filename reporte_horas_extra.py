@@ -13,7 +13,7 @@ Coste total quincena (= dias + H. Extra + atrasos) y comentarios.
 """
 
 import sys, re, json, os
-from datetime import datetime
+from datetime import datetime, date
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
@@ -22,6 +22,7 @@ try:
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
+    from openpyxl.comments import Comment
 except ImportError:
     import subprocess
     subprocess.check_call([sys.executable, "-m", "pip", "install", "pandas", "openpyxl"])
@@ -29,6 +30,7 @@ except ImportError:
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
+    from openpyxl.comments import Comment
 
 
 # Arrastrar y soltar archivos (opcional: si tkinterdnd2 no esta disponible el
@@ -102,6 +104,46 @@ def _fecha_key(fecha):
         return datetime.max
 
 
+DIAS_SEMANA = ('Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom')
+MESES = ('Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto',
+         'Septiembre', 'Octubre', 'Noviembre', 'Diciembre')
+
+# Festivos de fecha fija en Republica Dominicana (dia, mes). Los festivos que
+# la ley traslada a lunes no se incluyen: se detectan por los dias marcados
+# con 2 en los reportes de obra.
+FESTIVOS_FIJOS = {(1, 1), (21, 1), (27, 2), (16, 8), (24, 9), (25, 12)}
+
+
+def es_domingo_o_festivo(fecha, festivos=()):
+    d = _fecha_key(fecha)
+    if d == datetime.max:
+        return False
+    return d.weekday() == 6 or (d.day, d.month) in FESTIVOS_FIJOS or fecha in festivos
+
+
+def etiqueta_dia(fecha):
+    """'18-09-2026' -> 'Vie 18/09'"""
+    d = _fecha_key(fecha)
+    if d == datetime.max:
+        return fecha
+    return f"{DIAS_SEMANA[d.weekday()]} {d.day:02d}/{d.month:02d}"
+
+
+def periodo_quincena(fechas):
+    """
+    A partir de las fechas de los reportes devuelve (nombre, desde, hasta),
+    p. ej. ('2Q Septiembre 2026', '18/09/2026', '01/10/2026'). La quincena es
+    del mes en que cae su dia central: 1Q si ese dia es <= 15, 2Q si no.
+    """
+    ds = sorted(d for d in (_fecha_key(f) for f in fechas) if d != datetime.max)
+    if not ds:
+        return None
+    centro = ds[0] + (ds[-1] - ds[0]) / 2
+    q = 1 if centro.day <= 15 else 2
+    nombre = f"{q}Q {MESES[centro.month - 1]} {centro.year}"
+    return nombre, ds[0].strftime('%d/%m/%Y'), ds[-1].strftime('%d/%m/%Y')
+
+
 def _worker(nombre, ajustero, tecnico, supervisor, oficio, obra, sal_dia, coste_hora,
             dias_trab, dias_dobles, coste_dias, coste_total, atrasos, obs, days):
     total_e = sum(days.values())
@@ -137,7 +179,7 @@ def _read_formato_diario(path):
     """
     Formato del reporte de Varias Obras: fila 1 con las fechas, fila 2 con
     cabeceras y por cada dia un bloque ADMIN, AJUSTE, OBRA 1, EXTRA 1, OBRA 2, EXTRA 2.
-    Devuelve (workers_todos, coste_dias_todos).
+    Devuelve (workers_todos, coste_dias_todos, info) con info = {'fechas', 'festivos'}.
     """
     raw = pd.read_excel(path, header=None)
     date_row, header_row = raw.iloc[0], raw.iloc[1]
@@ -223,26 +265,28 @@ def _read_formato_diario(path):
             days        = day_hours,
         ))
 
-    return workers, sum(w['COSTE DIAS'] for w in workers)
+    info = {'fechas': [b['fecha'] for b in day_blocks], 'festivos': set()}
+    return workers, sum(w['COSTE DIAS'] for w in workers), info
 
 
 def read_varias_obras(path):
-    """Devuelve: (nombre_hoja, workers, coste_dias_obra, total_trabajadores)"""
-    todos, total_obra = _read_formato_diario(path)
-    return ('Varias Obras', todos, float(total_obra), len(todos))
+    """Devuelve: (nombre_hoja, workers, coste_dias_obra, total_trabajadores, info)"""
+    todos, total_obra, info = _read_formato_diario(path)
+    return ('Varias Obras', todos, float(total_obra), len(todos), info)
 
 
 def read_obra_xlsm(path, sheet_name):
     """
     Reporte de obra (.xlsm, hoja 'Reporte', cabecera en la fila 4).
     Si el fichero no tiene hoja 'Reporte' se lee con el formato de Varias Obras.
-    Devuelve: (nombre_hoja, workers, coste_dias_obra, total_trabajadores)
+    Devuelve: (nombre_hoja, workers, coste_dias_obra, total_trabajadores, info)
+    info = {'fechas': fechas del reporte, 'festivos': fechas con algun dia doble}
     """
     if 'Reporte' not in pd.ExcelFile(path).sheet_names:
-        todos, total_obra = _read_formato_diario(path)
+        todos, total_obra, info = _read_formato_diario(path)
         for w in todos:
             w['OBRA'] = ''
-        return (sheet_name, todos, float(total_obra), len(todos))
+        return (sheet_name, todos, float(total_obra), len(todos), info)
 
     df = pd.read_excel(path, header=3, sheet_name='Reporte')
     df.columns = [_norm(c) for c in df.columns]
@@ -265,7 +309,9 @@ def read_obra_xlsm(path, sheet_name):
         if col.startswith('ADMIN') or col.startswith('AJUSTE'):
             m = re.search(r'(\d{1,2})/(\d{1,2})/(\d{4})', col)
             if m:
-                dias_per_col[col] = m.groups()
+                d, mo, y = m.groups()
+                dias_per_col[col] = f"{int(d):02d}-{int(mo):02d}-{y}"
+    festivos = set()
 
     def get(row, *names):
         for n in names:
@@ -286,6 +332,7 @@ def read_obra_xlsm(path, sheet_name):
             dias_fecha[fecha] = dias_fecha.get(fecha, 0) + _num(row[col])
         dias_trab = sum(1 for v in dias_fecha.values() if v > 0)
         dobles    = sum(v - 1 for v in dias_fecha.values() if v > 1)
+        festivos.update(f for f, v in dias_fecha.items() if v > 1)
 
         sal_dia    = _num(get(row, 'SALARIO X DIA'))
         coste_hora = _num(get(row, 'COSTE HORAS EXTRA')) or sal_dia / 8
@@ -318,7 +365,9 @@ def read_obra_xlsm(path, sheet_name):
         ))
 
     total_obra = sum(w['COSTE DIAS'] for w in workers)
-    return (sheet_name, workers, float(total_obra), len(workers))
+    info = {'fechas': sorted(set(dias_per_col.values()) | set(date_per_col.values()), key=_fecha_key),
+            'festivos': festivos}
+    return (sheet_name, workers, float(total_obra), len(workers), info)
 
 
 def detect_obra_code(path):
@@ -335,6 +384,8 @@ def detect_obra_code(path):
 # Paleta azul — visualmente intuitiva, accesible para consulta rapida
 HDR_BG   = "1F4E79"   # azul oscuro (cabecera)
 TOTAL_BG = "E26B0A"   # naranja: cabecera de las columnas que suman totales
+DOM_HDR  = "A6A6A6"   # gris: cabecera de domingos y festivos
+DOM_BG   = "EDEDED"   # gris claro: celdas de domingos y festivos
 HDR_FG   = "FFFFFF"
 DAY_BG   = "BDD7EE"   # azul claro para cols de dias
 TOT_BG   = "9DC3E6"   # azul medio para fila total
@@ -390,6 +441,60 @@ LABELS = {
     'COMENTARIOS':    'comentarios',
 }
 
+# Explicacion de cada columna: nota en la cabecera y hoja Leyenda
+NOTAS = {
+    'TRABAJADOR':     'Nombre del trabajador (OPERARIOS del reporte).',
+    'AJUSTERO':       'Ajustero responsable del trabajador (AJUSTERO del reporte).',
+    'TECNICO':        'Técnico de obra (TECNICO OBRA del reporte de Varias Obras).',
+    'SUPERVISOR':     'Supervisor (SUPERVISOR del reporte de obra).',
+    'OFICIO':         'Oficio del trabajador.',
+    'OBRA':           'Obras donde más horas ha trabajado en la quincena (máximo 2).',
+    'SAL. DIA':       'Salario diario, del reporte.',
+    'COSTE HORA':     'Coste de una hora extra, del reporte.',
+    '_DIA':           'Horas extra hechas ese día. Columnas en gris: domingo o festivo.',
+    'DIAS':           'Días realmente trabajados en la quincena. Un domingo o festivo '
+                      'pagado doble cuenta como 1 día.',
+    'DIAS DOBLES':    'Domingos o festivos trabajados, que se pagan doble. Su importe ya '
+                      'está incluido en Coste días / ajuste.',
+    'COSTE DIAS':     'Coste ordinario de la quincena (días + ajuste), copiado del reporte. '
+                      'No incluye horas extra ni atrasos.',
+    'TOTAL H. EXTRA': 'Suma de las horas extra de todos los días.',
+    '% H. EXTRA':     'Peso de las horas extra en lo generado: '
+                      'Coste H. Extra / (Coste días / ajuste + Coste H. Extra).',
+    'COSTE H. EXTRA': 'Total H. Extra × Coste/Hora.',
+    'DIAS ATR':       'Días atrasados de quincenas anteriores (se rellena a mano). '
+                      'Se pagan a Sal. Dia.',
+    'HORAS ATR':      'Horas extra atrasadas de quincenas anteriores (se rellena a mano). '
+                      'Se pagan a Coste/Hora.',
+    'ATRASOS':        'Importe de ATRASOS/OTROS del reporte (atrasos y ajustes ya '
+                      'calculados por la obra).',
+    'TOTAL ATR':      'Dias atrasados × Sal. Dia + Horas extras atrasadas × Coste/Hora + Otros.',
+    'COSTE TOTAL':    'Coste dias / ajuste + Coste H. Extra + Total atrasos. '
+                      'Es lo que se carga a la obra por este trabajador.',
+    'COMENTARIOS':    'Observaciones del reporte.',
+}
+
+NOTAS_RESUMEN = {
+    'Obra':                 'Reporte de origen: Varias Obras o código de la obra.',
+    'Trabajadores':         'Todas las personas del reporte.',
+    'Trab. con HE':         'Personas con alguna hora extra en la quincena.',
+    'Coste dias quincena':  'Coste ordinario (días + ajuste) de todas las personas del reporte.',
+    'Coste H. Extra':       'Suma de Coste H. Extra de la hoja de la obra.',
+    'Total H. Extra':       'Suma de horas extra de la hoja de la obra.',
+    '% s/Total':            'Coste H. Extra / (Coste dias quincena + Coste H. Extra).',
+    'Coste atrasos':        'Suma de Total atrasos de la hoja de la obra.',
+    'Coste Total (Dias + HE + Atrasos)':
+                            'Coste dias quincena + Coste H. Extra + Coste atrasos. '
+                            'Es el coste de mano de obra de la quincena.',
+}
+
+
+def _nota(texto):
+    c = Comment(texto, 'Reporte Horas Extra')
+    c.width, c.height = 260, 90
+    return c
+
+
 COL_WIDTHS = {
     'TRABAJADOR': 30, 'AJUSTERO': 26, 'TECNICO': 18, 'SUPERVISOR': 20, 'OFICIO': 14,
     'OBRA': 14, 'SAL. DIA': 10, 'COSTE HORA': 11, 'DIAS': 25, 'DIAS DOBLES': 20,
@@ -419,7 +524,7 @@ def _pct_he(w):
     return w['COSTE H. EXTRA'] / base if base > 0 else 0
 
 
-def write_sheet(wb, sheet_name, workers):
+def write_sheet(wb, sheet_name, workers, info=None):
     """
     Escribe la hoja de un reporte. Devuelve la fila de totales (o None si no hay
     trabajadores) y el mapa columna -> letra, para enlazar desde el Resumen.
@@ -430,7 +535,11 @@ def write_sheet(wb, sheet_name, workers):
         ws['A1'] = 'Sin trabajadores en el reporte'
         return None, {}
 
-    all_days = sorted({d for w in workers for d in w['_days']}, key=_fecha_key)
+    # Todos los dias de la quincena (aunque nadie tenga horas extra ese dia)
+    info     = info or {}
+    all_days = sorted(set(info.get('fechas', [])) | {d for w in workers for d in w['_days']},
+                      key=_fecha_key)
+    festivos = {d for d in all_days if es_domingo_o_festivo(d, info.get('festivos', ()))}
 
     fixed = ['TRABAJADOR', 'AJUSTERO']
     for key in ('TECNICO', 'SUPERVISOR', 'OFICIO', 'OBRA'):
@@ -463,11 +572,15 @@ def write_sheet(wb, sheet_name, workers):
 
     # ── Fila 1: cabecera ─────────────────────────────────────────────────────
     for ci, col in enumerate(all_cols, 1):
-        c = ws.cell(1, ci, LABELS.get(col, col))
         if col in all_days:
-            c.fill = _day_fill()
+            c = ws.cell(1, ci, etiqueta_dia(col))
+            c.fill = PatternFill('solid', start_color=DOM_HDR) if col in festivos else _day_fill()
             c.font = Font(name='Calibri', bold=True, color=HDR_BG, size=9)
+            c.comment = _nota(f"{col}. " + NOTAS['_DIA'])
         else:
+            c = ws.cell(1, ci, LABELS.get(col, col))
+            if col in NOTAS:
+                c.comment = _nota(NOTAS[col])
             c.fill = _total_hdr_fill() if col in TOTAL_HDR_COLS else _hdr_fill()
             c.font = _hdr_font()
         c.alignment = _cen()
@@ -516,6 +629,8 @@ def write_sheet(wb, sheet_name, workers):
             c.font      = Font(name='Calibri', size=10, bold=bold, color=color)
             c.border    = _brd_row()
             c.alignment = _left() if col in TEXT_COLS else _cen()
+            if col in festivos:
+                c.fill = PatternFill('solid', start_color=DOM_BG)
             if col in ('SAL. DIA', 'COSTE HORA', 'COSTE H. EXTRA', 'COSTE TOTAL'):
                 c.number_format = FMT_MONEY
             elif col in ACCT_COLS:
@@ -563,12 +678,107 @@ def _ref(sheet_title, cell):
     return "'" + sheet_title.replace("'", "''") + "'!" + cell
 
 
+def periodo_de(sheets):
+    """
+    Quincena de un conjunto de reportes leidos: (nombre, desde, hasta) o None.
+    Si los reportes no son todos de la misma quincena, se toma la que mas se
+    repite (y, en empate, la mas reciente).
+    """
+    periodos = [p for p in (periodo_quincena(sh[4].get('fechas', [])) for sh in sheets) if p]
+    if not periodos:
+        return None
+    return max(periodos, key=lambda p: (periodos.count(p),
+                                        datetime.strptime(p[2], '%d/%m/%Y')))
+
+
+def write_leyenda(wb, periodo):
+    """Hoja que explica de donde sale cada columna y que significa cada color."""
+    ws = wb.create_sheet('Leyenda', 1)
+    ws.column_dimensions['A'].width = 28
+    ws.column_dimensions['B'].width = 95
+    r = 1
+
+    def titulo(texto, size=14):
+        nonlocal r
+        c = ws.cell(r, 1, texto)
+        c.font = Font(name='Calibri', bold=True, size=size, color=HDR_BG)
+        r += 1
+
+    def cabecera(a, b):
+        nonlocal r
+        for ci, t in enumerate((a, b), 1):
+            c = ws.cell(r, ci, t)
+            c.font, c.fill, c.border = _hdr_font(), _hdr_fill(), _brd_outer()
+        r += 1
+
+    def fila(a, b, fill=None, font_color='000000', bold=False):
+        nonlocal r
+        ca = ws.cell(r, 1, a)
+        cb = ws.cell(r, 2, b)
+        ca.font = Font(name='Calibri', size=10, bold=True, color=font_color)
+        cb.font = Font(name='Calibri', size=10, bold=bold)
+        cb.alignment = Alignment(wrap_text=True, vertical='center')
+        ca.alignment = Alignment(vertical='center')
+        for c in (ca, cb):
+            c.border = _brd_row()
+        if fill:
+            ca.fill = PatternFill('solid', start_color=fill)
+        r += 1
+
+    titulo('Cómo leer este informe', 16)
+    if periodo:
+        ws.cell(r, 1, f'Quincena: {periodo[0]}  ·  del {periodo[1]} al {periodo[2]}').font = \
+            Font(name='Calibri', size=11, italic=True)
+        r += 1
+    ws.cell(r, 1, 'Todas las cantidades están en pesos dominicanos (RD$).').font = \
+        Font(name='Calibri', size=10, italic=True)
+    r += 2
+
+    titulo('Hojas de cada obra', 12)
+    cabecera('Columna', 'Qué es y de dónde sale')
+    orden = ['TRABAJADOR', 'AJUSTERO', 'SUPERVISOR', 'TECNICO', 'OFICIO', 'OBRA', 'SAL. DIA',
+             'COSTE HORA', '_DIA', 'DIAS', 'DIAS DOBLES', 'COSTE DIAS', 'TOTAL H. EXTRA',
+             '% H. EXTRA', 'COSTE H. EXTRA', 'DIAS ATR', 'HORAS ATR', 'ATRASOS', 'TOTAL ATR',
+             'COSTE TOTAL', 'COMENTARIOS']
+    for key in orden:
+        nombre = 'Días (Lun 01/09 …)' if key == '_DIA' else LABELS[key]
+        fila(nombre, NOTAS[key], fill=TOTAL_BG if key in TOTAL_HDR_COLS else None,
+             font_color=HDR_FG if key in TOTAL_HDR_COLS else '000000')
+    fila('Fila Total', 'Suma de cada columna. El % es el de la obra completa.')
+    r += 1
+
+    titulo('Hoja Resumen', 12)
+    cabecera('Columna', 'Qué es y de dónde sale')
+    for nombre, texto in NOTAS_RESUMEN.items():
+        es_total = nombre in ('Coste dias quincena', 'Coste H. Extra', 'Coste atrasos',
+                              'Coste Total (Dias + HE + Atrasos)')
+        fila(nombre, texto, fill=TOTAL_BG if es_total else None,
+             font_color=HDR_FG if es_total else '000000')
+    r += 1
+
+    titulo('Colores y avisos', 12)
+    cabecera('Color', 'Significado')
+    fila('Cabecera naranja', 'Columna de costes / totales.', fill=TOTAL_BG, font_color=HDR_FG)
+    fila('Día en gris', 'Domingo o festivo.', fill=DOM_HDR)
+    fila(f'Número rojo en un día', f'Más de {CONFIG_HORAS_DIA_ALERTA} horas extra en un solo día.',
+         font_color=ALERT_FG)
+    fila('Fila en rojo', 'Trabajador con horas extra muy por encima de la media de su obra '
+         f'(más de 2,3 veces la media y 25 h por encima) o con un % H. Extra alto '
+         f'(más de 1,5 veces el % medio, 10 puntos por encima y nunca menos del '
+         f'{int(round(CONFIG_PORCENTAJE_MINIMO * 100))} %).', font_color=ALERT_FG)
+    fila('"-" en un importe', 'Cero.')
+    fila('Nota en la cabecera', 'Al pasar el ratón por una cabecera se ve esta misma explicación.')
+    ws.freeze_panes = 'A2'
+
+
 def build_excel(sheets, output_path):
-    """sheets es lista de (sheet_name, workers, coste_dias_obra, total_trabajadores)."""
+    """sheets es lista de (sheet_name, workers, coste_dias_obra, total_trabajadores, info)."""
     wb = Workbook()
     wb.remove(wb.active)
+    periodo = periodo_de(sheets)
 
     # ── Hoja resumen ──────────────────────────────────────────────────────────
+    # Titulo con la quincena y debajo la tabla:
     # Obra | Trabajadores | Trab. con HE | Coste dias quincena | Coste H. Extra
     #      | Total H. Extra | % s/Total | Coste atrasos | Coste Total
     # Coste dias quincena es el coste ordinario de TODOS los trabajadores del
@@ -576,22 +786,35 @@ def build_excel(sheets, output_path):
     # rellenar atrasos a mano el resumen se actualiza solo.
     ws_r = wb.create_sheet('Resumen', 0)
 
-    headers = ['Obra', 'Trabajadores', 'Trab. con HE', 'Coste dias quincena',
-               'Coste H. Extra', 'Total H. Extra', '% s/Total', 'Coste atrasos',
-               'Coste Total (Dias + HE + Atrasos)']
-    n_cols = len(headers)
+    headers = list(NOTAS_RESUMEN)
+    n_cols  = len(headers)
+    last_cl = get_column_letter(n_cols)
+
+    t = ws_r.cell(1, 1, 'Reporte de Horas Extra y Atrasos' + (f' · {periodo[0]}' if periodo else ''))
+    t.font = Font(name='Calibri', bold=True, size=14, color=HDR_BG)
+    ws_r.merge_cells(f'A1:{last_cl}1')
+    sub = (f'Del {periodo[1]} al {periodo[2]}  ·  ' if periodo else '') + \
+          f'Generado el {date.today().strftime("%d/%m/%Y")}  ·  Importes en RD$  ·  ' \
+          'Ver la hoja Leyenda para el significado de cada columna'
+    ws_r.cell(2, 1, sub).font = Font(name='Calibri', size=10, italic=True, color='595959')
+    ws_r.merge_cells(f'A2:{last_cl}2')
+    ws_r.row_dimensions[1].height = 22
+
+    HR = 4                      # fila de cabecera de la tabla
     for ci, label in enumerate(headers, 1):
-        c = ws_r.cell(1, ci, label)
+        c = ws_r.cell(HR, ci, label)
         c.font      = _hdr_font()
         # Mismas columnas en naranja que en las hojas
         c.fill      = _total_hdr_fill() if ci in (4, 5, 8, 9) else _hdr_fill()
-        c.alignment = _cen()
+        c.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
         c.border    = _brd_outer()
-    ws_r.row_dimensions[1].height = 18
+        c.comment   = _nota(NOTAS_RESUMEN[label])
+    ws_r.row_dimensions[HR].height = 30
 
     money_cols = (4, 5, 8, 9)
-    for ri, (sname, workers, coste_dias_obra, total_trab) in enumerate(sheets, 2):
-        tr, L = write_sheet(wb, sname, workers)
+    first = HR + 1
+    for ri, (sname, workers, coste_dias_obra, total_trab, info) in enumerate(sheets, first):
+        tr, L = write_sheet(wb, sname, workers, info)
         title = sname[:31]
         if tr:
             last = tr - 1
@@ -614,7 +837,7 @@ def build_excel(sheets, output_path):
             if ci == 6:          c.number_format = FMT_NUM
             if ci == 7:          c.number_format = FMT_PCT
 
-    tr = 1 + len(sheets) + 1
+    tr = first + len(sheets)
     for ci in range(1, n_cols + 1):
         c = ws_r.cell(tr, ci)
         c.fill      = _tot_fill()
@@ -629,15 +852,16 @@ def build_excel(sheets, output_path):
             c.value = f'=IFERROR(E{tr}/(D{tr}+E{tr}),0)'
             c.number_format = FMT_PCT
         else:
-            c.value = f'=SUM({cl}2:{cl}{tr-1})'
+            c.value = f'=SUM({cl}{first}:{cl}{tr-1})'
             if ci in money_cols: c.number_format = FMT_MONEY
             if ci == 6:          c.number_format = FMT_NUM
 
     for col, width in zip('ABCDEFGHI', (22, 13, 13, 20, 16, 15, 12, 16, 32)):
         ws_r.column_dimensions[col].width = width
-    ws_r.auto_filter.ref = f"A1:{get_column_letter(n_cols)}{tr-1}"
-    ws_r.freeze_panes = 'A2'
+    ws_r.auto_filter.ref = f"A{HR}:{last_cl}{tr-1}"
+    ws_r.freeze_panes = f'A{HR + 1}'
 
+    write_leyenda(wb, periodo)
     wb.save(output_path)
 
 
@@ -1026,34 +1250,42 @@ class App(tk.Tk):
                 "Selecciona al menos un reporte antes de generar el informe.")
             return
 
-        output = filedialog.asksaveasfilename(
-            title="Guardar informe de horas extra y atrasos como…",
-            defaultextension=".xlsx",
-            filetypes=[("Excel", "*.xlsx")],
-            initialfile="Reporte_Horas_Extras_Atrasos.xlsx")
-        if not output:
-            return
-
         self.progress.start(10)
-        self.lbl_status.config(text="Procesando…", fg="#444")
+        self.lbl_status.config(text="Leyendo reportes…", fg="#444")
         self.update()
 
         try:
             sheets = []
             if self._varias_path:
-                name, workers, total_obra, total_trab = read_varias_obras(self._varias_path)
-                sheets.append((name, workers, total_obra, total_trab))
+                sheets.append(read_varias_obras(self._varias_path))
             for path, sheet_label, _ in self._obras:
-                name, workers, total_obra, total_trab = read_obra_xlsm(path, sheet_label)
-                sheets.append((name, workers, total_obra, total_trab))
+                sheets.append(read_obra_xlsm(path, sheet_label))
 
+            # Nombre por defecto con la quincena: Reporte_Horas_Extras_Atrasos_2Q_Septiembre_2026
+            periodo = periodo_de(sheets)
+            nombre  = "Reporte_Horas_Extras_Atrasos"
+            if periodo:
+                nombre += "_" + periodo[0].replace(" ", "_")
+            self.progress.stop()
+            output = filedialog.asksaveasfilename(
+                title="Guardar informe de horas extra y atrasos como…",
+                defaultextension=".xlsx",
+                filetypes=[("Excel", "*.xlsx")],
+                initialfile=nombre + ".xlsx")
+            if not output:
+                self.lbl_status.config(text="", fg="#444")
+                return
+
+            self.progress.start(10)
+            self.lbl_status.config(text="Generando informe…", fg="#444")
+            self.update()
             build_excel(sheets, output)
 
-            total_w  = sum(len(w) for _, w, _, _ in sheets)
-            total_he = sum(x['TOTAL H. EXTRA'] for _, w, _, _ in sheets for x in w)
+            total_w  = sum(len(sh[1]) for sh in sheets)
+            total_he = sum(x['TOTAL H. EXTRA'] for sh in sheets for x in sh[1])
 
             self.lbl_status.config(
-                text=f"✔ Listo — {len(sheets)} hojas · {total_w} trabajadores · {total_he:.1f} h extra",
+                text=f"✔ Listo — {len(sheets)} hojas · {total_w} trabajadores · {total_he:g} h extra",
                 fg="#1a6b1a")
 
             if messagebox.askyesno(
