@@ -247,6 +247,48 @@ def redactar_comentario(texto):
     return ' '.join(frases)
 
 
+def _num_es(texto):
+    """'1.181,25' -> 1181.25"""
+    return float(texto.replace('.', '').replace(',', '.'))
+
+
+def desglose_atrasos(comentario, importe, sal_dia, coste_hora):
+    """
+    Desglosa el importe de Otros a partir del comentario ya redactado, para
+    escribirlo como formula comprobable en la celda. Devuelve (dias, horas,
+    importes) tal que dias*Sal. Dia + horas*Coste/Hora + sum(importes) == importe,
+    o None si el comentario no explica exactamente el importe.
+    """
+    if not importe or importe < 0 or not comentario:
+        return None
+    t = comentario.split('Se descuenta')[0]
+    if not t.startswith('Se suman al cálculo'):
+        return None
+
+    # Importes escritos en el comentario: "coste nocturno RD$ 1.181,25"
+    importes = [_num_es(x) for x in re.findall(r'RD\$\s*([\d.]+,\d{2}|[\d.]+)', t)]
+    if importes and abs(sum(importes) - importe) < 0.01:
+        return 0, 0, importes
+
+    fecha = r'\d{1,2}(?:/\d{2})?'
+    lista = rf'{fecha}(?:(?:,\s*|\s+y\s+){fecha}(?!\s*h\b))*'
+    dias = 0
+    for m in re.finditer(rf'\bdomingos?\b(\s+{lista})?', t):
+        dias += len(re.findall(fecha, m.group(1))) if m.group(1) else 1
+    for m in re.finditer(r'\b(\d+) días\b', t):
+        dias += int(m.group(1))
+    for m in re.finditer(rf'\b(?:el día|los días)\s+({lista})', t):
+        dias += len(re.findall(fecha, m.group(1)))
+    horas = 0
+    for m in re.finditer(r'\b(\d+) h\b(.*?)(?=,\s*\d+ h\b|\s+y\s+\d+ h\b|\s+y\s+el domingo|$)', t):
+        fechas = re.findall(r'\b\d{1,2}(?:/\d{2})?\b', re.sub(r'\b\d+ h\b', '', m.group(2)))
+        horas += int(m.group(1)) * max(1, len(fechas) if re.search(r'\bdel\b', m.group(2)) else 1)
+
+    if (dias or horas) and abs(dias * sal_dia + horas * coste_hora - importe) < 0.01:
+        return dias, horas, []
+    return None
+
+
 def _worker(nombre, ajustero, tecnico, supervisor, oficio, obra, sal_dia, coste_hora,
             dias_trab, dias_dobles, coste_dias, coste_total, atrasos, obs, days,
             gratificacion=0.0):
@@ -506,6 +548,7 @@ PAGO2_BG = "B4A7D6"   # lila: 2o pago (horas extra y atrasos, tras autorizarse)
 TOTALQ_BG = "000000"  # negro: coste total de la quincena (1er + 2o pago)
 DOM_HDR  = "A6A6A6"   # gris: cabecera de domingos y festivos
 DOM_BG   = "EDEDED"   # gris claro: celdas de domingos y festivos
+REVISAR_BG = "FFE699" # ambar: importe de Otros que el comentario no explica
 HDR_FG   = "FFFFFF"
 DAY_BG   = "BDD7EE"   # azul claro para cols de dias
 TOT_BG   = "9DC3E6"   # azul medio para fila total
@@ -741,6 +784,17 @@ def write_sheet(wb, sheet_name, workers, info=None):
         for ci, col in enumerate(all_cols, 1):
             if col in formulas:
                 val = formulas[col]
+            elif col == 'ATRASOS':
+                # Otros: si el comentario explica el importe, formula con el desglose
+                d = desglose_atrasos(w['COMENTARIOS'], w['ATRASOS'], w['SAL. DIA'], w['COSTE HORA'])
+                if d:
+                    dias, horas, importes = d
+                    partes = ([f"{dias}*{L['SAL. DIA']}{r}"] if dias else []) + \
+                             ([f"{horas}*{L['COSTE HORA']}{r}"] if horas else []) + \
+                             [f"{x:g}" for x in importes]
+                    val = '=' + '+'.join(partes)
+                else:
+                    val = w['ATRASOS']
             elif col in all_days:
                 val = w['_days'].get(col)
             elif col in ('DIAS ATR', 'HORAS ATR'):
@@ -761,6 +815,8 @@ def write_sheet(wb, sheet_name, workers, info=None):
             c.alignment = _left() if col in TEXT_COLS else _cen()
             if col in festivos:
                 c.fill = PatternFill('solid', start_color=DOM_BG)
+            if col == 'ATRASOS' and w['ATRASOS'] and not (isinstance(val, str) and val.startswith('=')):
+                c.fill = PatternFill('solid', start_color=REVISAR_BG)   # sin desglose: revisar
             if col in ('SAL. DIA', 'GRATIF', 'COSTE HORA', 'COSTE H. EXTRA', 'A PAGAR', 'COSTE TOTAL'):
                 c.number_format = FMT_MONEY
             elif col in ACCT_COLS:
