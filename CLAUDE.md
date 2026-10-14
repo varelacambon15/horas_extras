@@ -48,7 +48,9 @@ una columna por día con horas extra, y después (en este orden):
 - A pagar H.E. + Atrasos = Coste H. Extra + Total atrasos (2º pago).
 - Coste total quincena = Coste dias / ajuste + A pagar H.E. + Atrasos
   (lo que se le carga a la obra; coincide con COSTE TOTAL / IMPORTE TOTAL de la plantilla).
-- comentarios = OBSERVACIONES.
+- comentarios = OBSERVACIONES reescritas con `redactar_comentario`: lo que se paga como
+  "Se suman al cálculo 2 h extra del 15/09 y 6 h del 16/09.", los descuentos como
+  "Se descuenta del cálculo …"; fechas dd/mm, "N h extra", acentos y erratas corregidos.
 
 - Proceso de pago: 1er pago = pago ordinario de la quincena (Coste dias / ajuste, cabecera
   NARANJA); 2º pago = horas extra y atrasos cuando se autorizan (Coste H. Extra, Total
@@ -57,7 +59,7 @@ una columna por día con horas extra, y después (en este orden):
 - Horas y días siempre sin decimales.
 - Aparecen TODOS los trabajadores del reporte (con o sin horas extra / atrasos).
 - Varias Obras lleva además Técnico Obra y Obra.
-- Gratificación (GRATIFICACIONES del .xlsm) justo después de Sal. Dia, solo si alguien la tiene;
+- Complemento / día (GRATIFICACIONES del .xlsm) justo después de Sal. Dia, solo si alguien la tiene;
   explica por qué el Coste/Hora es mayor que Sal. Dia / 8.
 - Resumen: Obra | Trabajadores | Trab. con HE | Coste dias quincena (ordinario de
   TODOS los trabajadores) | Coste H. Extra | Total H. Extra | % s/Total

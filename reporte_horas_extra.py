@@ -153,6 +153,100 @@ def periodo_quincena(fechas):
     return nombre, ds[0].strftime('%d/%m/%Y'), ds[-1].strftime('%d/%m/%Y')
 
 
+# ---------------------------------------------------------------------------
+# Redaccion clara de las observaciones de los reportes
+# ---------------------------------------------------------------------------
+# Las observaciones llegan escritas a mano ("se le deben 2h extras del 15/09/26").
+# Se reescriben para que quede claro que se paga y que se descuenta:
+#   "Se suman al cálculo 2 h extra del 15/09 y 6 h del 16/09."
+
+_ERRATAS = [
+    (r'\bestras\b', 'extras'), (r'\bfueorn\b', 'fueron'), (r'\bparaga\b', 'pagará'),
+    (r'\bmas\b', 'más'), (r'\bdemas\b', 'de más'), (r'\bdias\b', 'días'),
+    (r'\bdia\b', 'día'), (r'\btenia\b', 'tenía'), (r'\bentro el\b', 'entró el'),
+    (r'\bingreso el\b', 'ingresó el'), (r'\bmedica\b', 'médica'),
+    (r'\bperdida de\b', 'pérdida de'), (r'\bprestamo\b', 'préstamo'), (r'\bpago\b(?= de más)', 'pagó'),
+    (r'\bse pago\b', 'se pagó'), (r'\bdom\.', 'domingo'), (r'\bsep\.(?=\s|$)', 'septiembre'), (r'\bsep\b', 'septiembre'),
+]
+
+def _unir(partes):
+    """['a', 'b', 'c'] -> 'a, b y c'"""
+    partes = [p for p in partes if p]
+    if len(partes) <= 1:
+        return ''.join(partes)
+    return ', '.join(partes[:-1]) + ' y ' + partes[-1]
+
+def redactar_comentario(texto):
+    """Reescribe una observacion del reporte con una redaccion clara."""
+    t = ' '.join(str(texto or '').split())
+    if not t:
+        return ''
+    letras = [c for c in t if c.isalpha()]
+    if letras and sum(c.isupper() for c in letras) > len(letras) / 2:
+        t = t.lower()                                   # TEXTO EN MAYUSCULAS
+    # fechas 15/09/26, 30.07.26 -> 15/09 ; 30/07
+    t = re.sub(r'\b(\d{1,2})[/.](\d{1,2})[/.]\d{2,4}\b',
+               lambda m: f"{int(m.group(1)):02d}/{int(m.group(2)):02d}", t)
+    # horas: 5h, 5hrs, 5 horas, +5hras -> 5 h ; "h extras" -> "h extra"
+    t = re.sub(r'\+\s*(\d)', r'más \1', t)
+    t = re.sub(r'(\d+)\s*(?:hras|hrs?|horas?|h)\b\.?', r'\1 h', t, flags=re.I)
+    t = re.sub(r'(\d+) h (?:extras?|estras)\b', r'\1 h extra', t, flags=re.I)
+    t = re.sub(r'(\d+) h (pendientes?|nocturnas?|no reportad)', r'\1 h extra \2', t)
+    for patron, nuevo in _ERRATAS:
+        t = re.sub(patron, nuevo, t, flags=re.I)
+    t = re.sub(r'\b(\d{1,2}),(?=\d)', r'\1, ', t)         # 7,11,18 -> 7, 11, 18 (no 1.181,25)
+    t = re.sub(r'\s*\bno reportad([oa]s?)\b', r' (no reportad\1 en su día)', t)
+    if 'h extra' not in t:                              # "4 h del 30/07" -> "4 h extra ..."
+        t = re.sub(r'(\d+) h\b(?! extra)', r'\1 h extra', t)
+    t = re.sub(r'(?:se le )?pag[oó] de más (?:la )?quincena pasada',
+               'descuento de lo pagado de más la quincena pasada', t, flags=re.I)
+    t = re.sub(r'\bdescuento (\d+),\s*', r'descuento \1 de ', t, flags=re.I)
+    t = re.sub(r'\bse le deben?\b\s*', '', t, flags=re.I)
+
+    # Trocear en partes: por " / ", ";" y por comas que no separan una lista de dias
+    # (la barra solo separa si lleva espacios: "15/09" es una fecha)
+    trozos = re.split(r'\s+/\s*|\s*/\s+|;\s*|,\s*(?=\d+ h\b|\d+ d[ií]as?\b|[^\d\s])'
+                      r'|\s+y\s+(?=\d+ h\b|el domingo|domingo)', t)
+    sumas, descuentos, otros = [], [], []
+    ultimo = None                                       # lista donde fue la parte anterior
+    for p in (x.strip(' ,.') for x in trozos):
+        if not p:
+            continue
+        es_descuento = re.match(r'(?:\d+\w*\s+)?descuento', p, re.I)
+        es_suma = re.match(r'(\d|el domingo|domingo|atrasos?\b|d[ií]as?\b|pago de|el día|los días'
+                           r'|coste nocturno|d[ií]a festivo)',
+                           p, re.I)
+        if not es_descuento and not es_suma and ultimo:
+            ultimo[-1] += ', ' + p                      # coletilla de la parte anterior
+            continue
+        if es_descuento:
+            p = re.sub(r'^(?:(\d+)\w*\s+)?descuento(?:\s+(\d+))?,?\s*(?:de\s+)?', 
+                       lambda m: f"plazo {m.group(1) or m.group(2)} de " if (m.group(1) or m.group(2)) else '',
+                       p, flags=re.I)
+            descuentos.append(p)
+            ultimo = descuentos
+        elif es_suma:
+            p = re.sub(r'^atrasos?\s+', '', p, flags=re.I)
+            p = re.sub(r'^domingo\b', 'el domingo', p)
+            p = re.sub(r'^día\b', 'el día', p)
+            p = re.sub(r'^coste nocturno\b', 'el coste nocturno', p)
+            p = re.sub(r'^días\b', 'los días', p)
+            p = re.sub(r'\b(\d+) septiembre\b', r'\1 de septiembre', p)
+            sumas.append(p)
+            ultimo = sumas
+        else:
+            otros.append(p[0].upper() + p[1:])
+            ultimo = otros
+
+    frases = []
+    if sumas:
+        frases.append('Se suman al cálculo ' + _unir(sumas) + '.')
+    if descuentos:
+        frases.append('Se descuenta del cálculo ' + _unir(descuentos) + '.')
+    frases += [o + '.' for o in otros]
+    return ' '.join(frases)
+
+
 def _worker(nombre, ajustero, tecnico, supervisor, oficio, obra, sal_dia, coste_hora,
             dias_trab, dias_dobles, coste_dias, coste_total, atrasos, obs, days,
             gratificacion=0.0):
@@ -172,7 +266,7 @@ def _worker(nombre, ajustero, tecnico, supervisor, oficio, obra, sal_dia, coste_
         'COSTE DIAS':     coste_dias,
         'COSTE TOTAL':    coste_total,
         'ATRASOS':        atrasos,
-        'COMENTARIOS':    obs,
+        'COMENTARIOS':    redactar_comentario(obs),
         'TOTAL H. EXTRA': total_e,
         'COSTE H. EXTRA': total_e * coste_hora,
         '_days':          days,
@@ -440,7 +534,7 @@ LABELS = {
     'OFICIO':         'Oficio',
     'OBRA':           'Obra',
     'SAL. DIA':       'Sal. Dia',
-    'GRATIF':         'Gratificación',
+    'GRATIF':         'Complemento / día',
     'COSTE HORA':     'Coste/Hora',
     'DIAS':           'Dias quincena trabajados',
     'DIAS DOBLES':    'Domingos / Festivos',
@@ -518,7 +612,7 @@ def _nota(texto):
 
 COL_WIDTHS = {
     'TRABAJADOR': 30, 'AJUSTERO': 26, 'TECNICO': 18, 'SUPERVISOR': 20, 'OFICIO': 14,
-    'OBRA': 14, 'SAL. DIA': 10, 'GRATIF': 13, 'COSTE HORA': 11, 'DIAS': 25, 'DIAS DOBLES': 20,
+    'OBRA': 14, 'SAL. DIA': 10, 'GRATIF': 17, 'COSTE HORA': 11, 'DIAS': 25, 'DIAS DOBLES': 20,
     'COSTE DIAS': 22,
     'COSTE H. EXTRA': 14, 'TOTAL H. EXTRA': 13, '% H. EXTRA': 12, 'COSTE TOTAL': 20,
     'DIAS ATR': 14, 'HORAS ATR': 21, 'ATRASOS': 16, 'TOTAL ATR': 16, 'A PAGAR': 22,
