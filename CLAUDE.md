@@ -25,18 +25,35 @@ cada quincena a partir de los reportes de nómina de las obras.
 
 ## Informe de salida
 
-El formato de referencia es la hoja 26235 que preparó el usuario (2Q septiembre 2026).
-Cada hoja de obra: Trabajador, Ajustero, Supervisor, Oficio, Sal. Dia, Coste/Hora,
-una columna por día con horas extra, Dias quincena trabajados, Coste dias / ajuste
-(= Coste total quincena − Coste H. Extra), Coste H. Extra, Total H. Extra, % H. Extra,
-Coste total quincena, Dias atrasados, Horas extras atrasadas, Atrasos/otros
-(= días × Sal. Dia + horas × Coste/Hora), coste total (= Coste H. Extra + Atrasos/otros),
-comentarios.
+El formato de referencia es la hoja 26235 que preparó el usuario (2Q septiembre 2026),
+corregida según los correos con Jaume Ordinas (Director de Proyectos), que pide un
+documento claro, "sin dados ni loterías": que se vea de dónde sale cada cifra y
+con pocas operaciones.
 
+Cada hoja de obra: Trabajador, Ajustero, Supervisor, Oficio, Sal. Dia, Coste/Hora,
+una columna por día con horas extra, y después:
+
+- Dias quincena trabajados: días REALES (un día marcado 2 cuenta como 1).
+- Dias dobles: días pagados doble (festivo/domingo); se pagan como ordinario.
+  En los .xlsm vienen como 2 en ADMIN/AJUSTE; en Varias Obras se deducen del
+  importe de COSTE ADMIN (no vienen marcados por día).
+- Coste dias / ajuste: coste ORDINARIO, trasladado de la plantilla (no fórmula).
+  .xlsm: COSTE DIAS. Varias Obras: COSTE ADMIN − horas extra + COSTE AJUSTE.
+- Coste H. Extra, Total H. Extra, % H. Extra (= Coste H. Extra / Coste total quincena).
+- Coste total quincena = Coste dias / ajuste + Coste extra total
+  (lo que se le carga a la obra de mano de obra; coincide con COSTE TOTAL / IMPORTE TOTAL).
+- Dias atrasados, Horas extras atrasadas: enteros, informativos, deducidos de
+  OBSERVACIONES; en ámbar si no cuadran con el importe.
+- Atrasos/otros: trasladado de la plantilla (ATRASOS/OTROS).
+- Coste extra total = Coste H. Extra + Atrasos/otros (+ nocturno y festivo en Varias Obras).
+- comentarios = OBSERVACIONES.
+
+- Horas y días siempre sin decimales.
 - Solo aparecen trabajadores con horas extra o con atrasos.
 - Varias Obras lleva además Técnico Obra, Obra, Coste nocturno y Dia festivo.
 - El Resumen enlaza por fórmula con los totales de cada hoja.
 - Alertas configurables desde el botón Ajustes (por defecto: >5 h en un día y 20 %).
+- Nombre del fichero generado: Reporte_Horas_Extras_Atrasos.xlsx
 
 ## Probar sin interfaz
 
