@@ -89,8 +89,17 @@ def _num(v):
     v = pd.to_numeric(v, errors='coerce')
     return float(v) if pd.notna(v) else 0.0
 
+def _reparar(texto):
+    """Corrige textos mal codificados del programa de nomina ('AlbaÃ±il' -> 'Albañil')."""
+    if 'Ã' in texto or 'Â' in texto:
+        try:
+            return texto.encode('latin-1').decode('utf-8')
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            pass
+    return texto
+
 def _txt(v):
-    return str(v).strip() if pd.notna(v) else ''
+    return _reparar(str(v).strip()) if pd.notna(v) else ''
 
 def _norm(col):
     """Normaliza cabeceras: quita saltos de linea, _x000D_ y espacios dobles."""
