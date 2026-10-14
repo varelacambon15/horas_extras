@@ -54,6 +54,8 @@ una columna por día con horas extra, y después (en este orden):
 - Horas y días siempre sin decimales.
 - Aparecen TODOS los trabajadores del reporte (con o sin horas extra / atrasos).
 - Varias Obras lleva además Técnico Obra y Obra.
+- Gratificación (GRATIFICACIONES del .xlsm) justo después de Sal. Dia, solo si alguien la tiene;
+  explica por qué el Coste/Hora es mayor que Sal. Dia / 8.
 - Resumen: Obra | Trabajadores | Trab. con HE | Coste dias quincena (ordinario de
   TODOS los trabajadores) | Coste H. Extra | Total H. Extra | % s/Total
   (= HE / (Dias + HE)) | Coste atrasos | Coste Total (Dias + HE + Atrasos).

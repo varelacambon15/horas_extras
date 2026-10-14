@@ -154,7 +154,8 @@ def periodo_quincena(fechas):
 
 
 def _worker(nombre, ajustero, tecnico, supervisor, oficio, obra, sal_dia, coste_hora,
-            dias_trab, dias_dobles, coste_dias, coste_total, atrasos, obs, days):
+            dias_trab, dias_dobles, coste_dias, coste_total, atrasos, obs, days,
+            gratificacion=0.0):
     total_e = sum(days.values())
     return {
         'TRABAJADOR':     nombre,
@@ -164,6 +165,7 @@ def _worker(nombre, ajustero, tecnico, supervisor, oficio, obra, sal_dia, coste_
         'OFICIO':         oficio,
         'OBRA':           obra,
         'SAL. DIA':       sal_dia,
+        'GRATIF':         gratificacion or None,
         'COSTE HORA':     coste_hora,
         'DIAS':           dias_trab,
         'DIAS DOBLES':    dias_dobles or None,
@@ -363,6 +365,7 @@ def read_obra_xlsm(path, sheet_name):
             oficio      = _txt(get(row, 'OFICIO')),
             obra        = '',
             sal_dia     = sal_dia,
+            gratificacion = _num(get(row, 'GRATIFICACIONES')),
             coste_hora  = coste_hora,
             dias_trab   = dias_trab,
             dias_dobles = dobles,
@@ -435,6 +438,7 @@ LABELS = {
     'OFICIO':         'Oficio',
     'OBRA':           'Obra',
     'SAL. DIA':       'Sal. Dia',
+    'GRATIF':         'Gratificación',
     'COSTE HORA':     'Coste/Hora',
     'DIAS':           'Dias quincena trabajados',
     'DIAS DOBLES':    'Domingos / Festivos',
@@ -482,7 +486,7 @@ def _nota(texto):
 
 COL_WIDTHS = {
     'TRABAJADOR': 30, 'AJUSTERO': 26, 'TECNICO': 18, 'SUPERVISOR': 20, 'OFICIO': 14,
-    'OBRA': 14, 'SAL. DIA': 10, 'COSTE HORA': 11, 'DIAS': 25, 'DIAS DOBLES': 20,
+    'OBRA': 14, 'SAL. DIA': 10, 'GRATIF': 13, 'COSTE HORA': 11, 'DIAS': 25, 'DIAS DOBLES': 20,
     'COSTE DIAS': 22,
     'COSTE H. EXTRA': 14, 'TOTAL H. EXTRA': 13, '% H. EXTRA': 12, 'COSTE TOTAL': 20,
     'DIAS ATR': 14, 'HORAS ATR': 21, 'ATRASOS': 16, 'TOTAL ATR': 16,
@@ -530,7 +534,10 @@ def write_sheet(wb, sheet_name, workers, info=None):
     for key in ('TECNICO', 'SUPERVISOR', 'OFICIO', 'OBRA'):
         if any(w.get(key) for w in workers):
             fixed.append(key)
-    fixed += ['SAL. DIA', 'COSTE HORA']
+    fixed.append('SAL. DIA')
+    if any(w.get('GRATIF') for w in workers):
+        fixed.append('GRATIF')          # gratificacion diaria: sube el Coste/Hora
+    fixed.append('COSTE HORA')
 
     tail = ['DIAS']
     if any(w.get('DIAS DOBLES') for w in workers):
@@ -615,7 +622,7 @@ def write_sheet(wb, sheet_name, workers, info=None):
             c.alignment = _left() if col in TEXT_COLS else _cen()
             if col in festivos:
                 c.fill = PatternFill('solid', start_color=DOM_BG)
-            if col in ('SAL. DIA', 'COSTE HORA', 'COSTE H. EXTRA', 'COSTE TOTAL'):
+            if col in ('SAL. DIA', 'GRATIF', 'COSTE HORA', 'COSTE H. EXTRA', 'COSTE TOTAL'):
                 c.number_format = FMT_MONEY
             elif col in ACCT_COLS:
                 c.number_format = FMT_ACCT
