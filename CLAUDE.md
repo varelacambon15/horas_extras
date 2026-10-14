@@ -42,12 +42,12 @@ una columna por día con horas extra, y después (en este orden):
 - Total H. Extra.
 - % H. Extra = Coste H. Extra / (Coste dias / ajuste + Coste H. Extra).
 - Coste H. Extra.
-- Dias atrasados, Horas extras atrasadas: CANTIDADES (días / horas) que se rellenan a mano.
-- Otros: ATRASOS/OTROS de la plantilla. Si el comentario lo explica exactamente
-  (`desglose_atrasos`), la celda es una fórmula comprobable (=1*Sal.Dia+6*Coste/Hora,
-  =1181.25+3000); si no cuadra pero es un número exacto de días de salario y el
-  comentario no habla de horas, pasa a Dias atrasados ("Ingresó el 17/09, se suma al
-  cálculo 1 día atrasado."); si no, queda el importe en ámbar para revisar.
+- Dias atrasados, Horas extras atrasadas: CANTIDADES (días / horas), editables a mano.
+- ATRASOS/OTROS de la plantilla se reparte según el comentario (`_atrasos_en_dias`):
+  días → Dias atrasados, horas → Horas extras atrasadas, importes citados (nocturno,
+  festivo) → Otros; solo si cuadra exacto. Si no lo explica pero es un número exacto de
+  días de salario y no habla de horas → Dias atrasados ("Ingresó el 17/09, se suma al
+  cálculo 1 día atrasado."). Si nada cuadra, queda en Otros en ámbar para revisar.
 - Total atrasos = Dias atrasados × Sal. Dia + Horas extras atrasadas × Coste/Hora + Otros.
 - A pagar H.E. + Atrasos = Coste H. Extra + Total atrasos (2º pago).
 - Coste total quincena = Coste dias / ajuste + A pagar H.E. + Atrasos
