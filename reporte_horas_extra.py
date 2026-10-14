@@ -395,7 +395,9 @@ def detect_obra_code(path):
 
 # Paleta azul — visualmente intuitiva, accesible para consulta rapida
 HDR_BG   = "1F4E79"   # azul oscuro (cabecera)
-TOTAL_BG = "E26B0A"   # naranja: cabecera de las columnas que suman totales
+TOTAL_BG = "E26B0A"   # naranja: 1er pago (ordinario de la quincena)
+PAGO2_BG = "B4A7D6"   # lila: 2o pago (horas extra y atrasos, tras autorizarse)
+TOTALQ_BG = "000000"  # negro: coste total de la quincena (1er + 2o pago)
 DOM_HDR  = "A6A6A6"   # gris: cabecera de domingos y festivos
 DOM_BG   = "EDEDED"   # gris claro: celdas de domingos y festivos
 HDR_FG   = "FFFFFF"
@@ -451,30 +453,60 @@ LABELS = {
     'HORAS ATR':      'Horas extras atrasadas',
     'ATRASOS':        'Otros',
     'TOTAL ATR':      'Total atrasos',
+    'A PAGAR':        'A pagar H.E. + Atrasos',
     'COMENTARIOS':    'comentarios',
 }
 
-# Nota en la cabecera de las columnas de totales (naranja)
+# Proceso de pago de cada quincena:
+#   1er pago (naranja): pago ordinario de la quincena -> Coste dias / ajuste.
+#   2o pago (lila): cuando se autorizan, horas extra y atrasos -> A pagar H.E. + Atrasos.
+#   Coste total quincena (negro) = 1er pago + 2o pago.
+PAGO_HDR = {
+    'COSTE DIAS':     TOTAL_BG,
+    'COSTE H. EXTRA': PAGO2_BG,
+    'TOTAL ATR':      PAGO2_BG,
+    'A PAGAR':        PAGO2_BG,
+    'COSTE TOTAL':    TOTALQ_BG,
+}
+
+# Nota en la cabecera de las columnas de pagos y totales
 NOTAS = {
-    'COSTE DIAS':     'Coste ordinario de la quincena (días + ajuste), copiado del reporte. '
+    'COSTE DIAS':     '1er PAGO · Pago ordinario de la quincena (días trabajados + ajuste), '
+                      'copiado del reporte. Se paga en la propia quincena. '
                       'No incluye horas extra ni atrasos.',
-    'COSTE H. EXTRA': 'Total H. Extra × Coste/Hora.',
-    'TOTAL ATR':      'Dias atrasados × Sal. Dia + Horas extras atrasadas × Coste/Hora + Otros.',
-    'COSTE TOTAL':    'Coste dias / ajuste + Coste H. Extra + Total atrasos. '
-                      'Es lo que se carga a la obra por este trabajador.',
+    'COSTE H. EXTRA': 'Parte del 2º PAGO · Total H. Extra × Coste/Hora. '
+                      'Se paga cuando se autorizan las horas extra.',
+    'TOTAL ATR':      'Parte del 2º PAGO · Dias atrasados × Sal. Dia + '
+                      'Horas extras atrasadas × Coste/Hora + Otros.',
+    'A PAGAR':        '2º PAGO · Coste H. Extra + Total atrasos. Es lo que queda por pagar '
+                      'al trabajador después del pago ordinario, una vez autorizado.',
+    'COSTE TOTAL':    'COSTE TOTAL DE LA QUINCENA · 1er pago (Coste dias / ajuste) + '
+                      '2º pago (A pagar H.E. + Atrasos). Es lo que se carga a la obra.',
 }
 
 RESUMEN_HEADERS = ['Obra', 'Trabajadores', 'Trab. con HE', 'Coste dias quincena',
                    'Coste H. Extra', 'Total H. Extra', '% s/Total', 'Coste atrasos',
-                   'Coste Total (Dias + HE + Atrasos)']
+                   'A pagar H.E. + Atrasos', 'Coste Total (Dias + HE + Atrasos)']
+
+RESUMEN_HDR = {
+    'Coste dias quincena':               TOTAL_BG,
+    'Coste H. Extra':                    PAGO2_BG,
+    'Coste atrasos':                     PAGO2_BG,
+    'A pagar H.E. + Atrasos':            PAGO2_BG,
+    'Coste Total (Dias + HE + Atrasos)': TOTALQ_BG,
+}
 
 NOTAS_RESUMEN = {
-    'Coste dias quincena':  'Coste ordinario (días + ajuste) de todas las personas del reporte.',
-    'Coste H. Extra':       'Suma de Coste H. Extra de la hoja de la obra.',
-    'Coste atrasos':        'Suma de Total atrasos de la hoja de la obra.',
+    'Coste dias quincena':  '1er PAGO · Pago ordinario (días + ajuste) de todas las personas '
+                            'del reporte. Se paga en la propia quincena.',
+    'Coste H. Extra':       'Parte del 2º PAGO · Suma de Coste H. Extra de la hoja de la obra.',
+    'Coste atrasos':        'Parte del 2º PAGO · Suma de Total atrasos de la hoja de la obra.',
+    'A pagar H.E. + Atrasos':
+                            '2º PAGO · Coste H. Extra + Coste atrasos. Lo que queda por pagar '
+                            'de la obra una vez autorizado.',
     'Coste Total (Dias + HE + Atrasos)':
-                            'Coste dias quincena + Coste H. Extra + Coste atrasos. '
-                            'Es el coste de mano de obra de la quincena.',
+                            'COSTE TOTAL DE LA QUINCENA · 1er pago (Coste dias quincena) + '
+                            '2º pago (A pagar H.E. + Atrasos). Coste de mano de obra de la obra.',
 }
 
 
@@ -489,16 +521,16 @@ COL_WIDTHS = {
     'OBRA': 14, 'SAL. DIA': 10, 'GRATIF': 13, 'COSTE HORA': 11, 'DIAS': 25, 'DIAS DOBLES': 20,
     'COSTE DIAS': 22,
     'COSTE H. EXTRA': 14, 'TOTAL H. EXTRA': 13, '% H. EXTRA': 12, 'COSTE TOTAL': 20,
-    'DIAS ATR': 14, 'HORAS ATR': 21, 'ATRASOS': 16, 'TOTAL ATR': 16,
+    'DIAS ATR': 14, 'HORAS ATR': 21, 'ATRASOS': 16, 'TOTAL ATR': 16, 'A PAGAR': 22,
     'COMENTARIOS': 45,
 }
 
 # Columnas que reunen totales: cabecera en naranja para distinguirlas
-TOTAL_HDR_COLS = ('COSTE DIAS', 'COSTE H. EXTRA', 'TOTAL ATR', 'COSTE TOTAL')
+TOTAL_HDR_COLS = tuple(PAGO_HDR)
 
 # Columnas que llevan SUM en la fila de totales
 SUM_COLS = ('DIAS', 'DIAS DOBLES', 'COSTE DIAS', 'COSTE H. EXTRA', 'TOTAL H. EXTRA',
-            'COSTE TOTAL', 'DIAS ATR', 'HORAS ATR', 'ATRASOS', 'TOTAL ATR')
+            'COSTE TOTAL', 'DIAS ATR', 'HORAS ATR', 'ATRASOS', 'TOTAL ATR', 'A PAGAR')
 
 # Columnas de importes en formato contable (vacias o cero se ven como "-")
 ACCT_COLS = ('COSTE DIAS', 'ATRASOS', 'TOTAL ATR')
@@ -543,7 +575,7 @@ def write_sheet(wb, sheet_name, workers, info=None):
     if any(w.get('DIAS DOBLES') for w in workers):
         tail.append('DIAS DOBLES')
     tail += ['COSTE DIAS', 'TOTAL H. EXTRA', '% H. EXTRA', 'COSTE H. EXTRA',
-             'DIAS ATR', 'HORAS ATR', 'ATRASOS', 'TOTAL ATR', 'COSTE TOTAL',
+             'DIAS ATR', 'HORAS ATR', 'ATRASOS', 'TOTAL ATR', 'A PAGAR', 'COSTE TOTAL',
              'COMENTARIOS']
 
     all_cols = fixed + all_days + tail
@@ -572,7 +604,7 @@ def write_sheet(wb, sheet_name, workers, info=None):
             c = ws.cell(1, ci, LABELS.get(col, col))
             if col in NOTAS:            # solo columnas de totales (naranja)
                 c.comment = _nota(NOTAS[col])
-            c.fill = _total_hdr_fill() if col in TOTAL_HDR_COLS else _hdr_fill()
+            c.fill = PatternFill('solid', start_color=PAGO_HDR[col]) if col in PAGO_HDR else _hdr_fill()
             c.font = _hdr_font()
         c.alignment = _cen()
         c.border    = _brd_outer()
@@ -593,7 +625,8 @@ def write_sheet(wb, sheet_name, workers, info=None):
             'COSTE H. EXTRA': f"={L['TOTAL H. EXTRA']}{r}*{L['COSTE HORA']}{r}",
             'TOTAL H. EXTRA': f"=SUM({first_day}{r}:{last_day}{r})" if all_days else 0,
             '% H. EXTRA':     f"=IFERROR({L['COSTE H. EXTRA']}{r}/({L['COSTE DIAS']}{r}+{L['COSTE H. EXTRA']}{r}),0)",
-            'COSTE TOTAL':    f"=N({L['COSTE DIAS']}{r})+N({L['COSTE H. EXTRA']}{r})+N({L['TOTAL ATR']}{r})",
+            'A PAGAR':        f"=N({L['COSTE H. EXTRA']}{r})+N({L['TOTAL ATR']}{r})",
+            'COSTE TOTAL':    f"=N({L['COSTE DIAS']}{r})+N({L['A PAGAR']}{r})",
             'TOTAL ATR':      (f"=N({L['DIAS ATR']}{r})*{L['SAL. DIA']}{r}"
                                f"+N({L['HORAS ATR']}{r})*{L['COSTE HORA']}{r}"
                                f"+N({L['ATRASOS']}{r})"),
@@ -611,7 +644,7 @@ def write_sheet(wb, sheet_name, workers, info=None):
             if val == '' or (isinstance(val, float) and val == 0.0 and col in all_days):
                 val = None
 
-            bold  = (col in ('TOTAL H. EXTRA', '% H. EXTRA') and es_alerta) or col == 'COSTE TOTAL'
+            bold  = (col in ('TOTAL H. EXTRA', '% H. EXTRA') and es_alerta) or col in ('A PAGAR', 'COSTE TOTAL')
             color = ALERT_FG if es_alerta else '000000'
             if col in all_days and val is not None and val > CONFIG_HORAS_DIA_ALERTA:
                 color, bold = ALERT_FG, True
@@ -622,7 +655,7 @@ def write_sheet(wb, sheet_name, workers, info=None):
             c.alignment = _left() if col in TEXT_COLS else _cen()
             if col in festivos:
                 c.fill = PatternFill('solid', start_color=DOM_BG)
-            if col in ('SAL. DIA', 'GRATIF', 'COSTE HORA', 'COSTE H. EXTRA', 'COSTE TOTAL'):
+            if col in ('SAL. DIA', 'GRATIF', 'COSTE HORA', 'COSTE H. EXTRA', 'A PAGAR', 'COSTE TOTAL'):
                 c.number_format = FMT_MONEY
             elif col in ACCT_COLS:
                 c.number_format = FMT_ACCT
@@ -647,7 +680,7 @@ def write_sheet(wb, sheet_name, workers, info=None):
             c.value = f'=SUM({cl}2:{cl}{last_data})'
             if col in all_days or col in NUM_COLS:
                 c.number_format = FMT_NUM
-            elif col in ('COSTE H. EXTRA', 'COSTE TOTAL'):
+            elif col in ('COSTE H. EXTRA', 'A PAGAR', 'COSTE TOTAL'):
                 c.number_format = FMT_MONEY
             else:
                 c.number_format = FMT_ACCT
@@ -710,15 +743,15 @@ def build_excel(sheets, output_path):
     for ci, label in enumerate(headers, 1):
         c = ws_r.cell(HR, ci, label)
         c.font      = _hdr_font()
-        # Mismas columnas en naranja que en las hojas
-        c.fill      = _total_hdr_fill() if ci in (4, 5, 8, 9) else _hdr_fill()
+        # Mismos colores de pago que en las hojas
+        c.fill      = PatternFill('solid', start_color=RESUMEN_HDR[label]) if label in RESUMEN_HDR else _hdr_fill()
         c.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
         c.border    = _brd_outer()
-        if label in NOTAS_RESUMEN:      # solo columnas de totales (naranja)
+        if label in NOTAS_RESUMEN:      # solo columnas de pagos y totales
             c.comment = _nota(NOTAS_RESUMEN[label])
     ws_r.row_dimensions[HR].height = 30
 
-    money_cols = (4, 5, 8, 9)
+    money_cols = (4, 5, 8, 9, 10)
     first = HR + 1
     for ri, (sname, workers, coste_dias_obra, total_trab, info) in enumerate(sheets, first):
         tr, L = write_sheet(wb, sname, workers, info)
@@ -734,10 +767,10 @@ def build_excel(sheets, output_path):
 
         valores = [sname, total_trab, con_he, coste_dias_obra, coste_he, total_he,
                    f'=IFERROR(E{ri}/(D{ri}+E{ri}),0)', atrasos,
-                   f'=D{ri}+E{ri}+H{ri}']
+                   f'=E{ri}+H{ri}', f'=D{ri}+I{ri}']
         for ci, val in enumerate(valores, 1):
             c = ws_r.cell(ri, ci, val)
-            c.font      = Font(name='Calibri', size=10, bold=(ci == n_cols))
+            c.font      = Font(name='Calibri', size=10, bold=(ci >= n_cols - 1))
             c.border    = _brd_row()
             c.alignment = _left() if ci == 1 else _cen()
             if ci in money_cols: c.number_format = FMT_MONEY
@@ -763,7 +796,7 @@ def build_excel(sheets, output_path):
             if ci in money_cols: c.number_format = FMT_MONEY
             if ci == 6:          c.number_format = FMT_NUM
 
-    for col, width in zip('ABCDEFGHI', (22, 13, 13, 20, 16, 15, 12, 16, 32)):
+    for col, width in zip('ABCDEFGHIJ', (22, 13, 13, 20, 16, 15, 12, 16, 22, 32)):
         ws_r.column_dimensions[col].width = width
     ws_r.auto_filter.ref = f"A{HR}:{last_cl}{tr-1}"
     ws_r.freeze_panes = f'A{HR + 1}'

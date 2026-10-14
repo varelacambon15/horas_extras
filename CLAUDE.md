@@ -45,12 +45,15 @@ una columna por día con horas extra, y después (en este orden):
 - Dias atrasados, Horas extras atrasadas: CANTIDADES (días / horas) que se rellenan a mano.
 - Otros: ATRASOS/OTROS trasladado de la plantilla.
 - Total atrasos = Dias atrasados × Sal. Dia + Horas extras atrasadas × Coste/Hora + Otros.
-- Coste total quincena = Coste dias / ajuste + Coste H. Extra + Total atrasos
+- A pagar H.E. + Atrasos = Coste H. Extra + Total atrasos (2º pago).
+- Coste total quincena = Coste dias / ajuste + A pagar H.E. + Atrasos
   (lo que se le carga a la obra; coincide con COSTE TOTAL / IMPORTE TOTAL de la plantilla).
 - comentarios = OBSERVACIONES.
 
-- Cabeceras en naranja: Coste dias / ajuste, Coste H. Extra, Total atrasos,
-  Coste total quincena (y sus equivalentes en el Resumen).
+- Proceso de pago: 1er pago = pago ordinario de la quincena (Coste dias / ajuste, cabecera
+  NARANJA); 2º pago = horas extra y atrasos cuando se autorizan (Coste H. Extra, Total
+  atrasos y A pagar H.E. + Atrasos, cabecera LILA); Coste total quincena = 1º + 2º (NEGRO).
+  Mismos colores en el Resumen. Estas cabeceras llevan nota explicando el proceso.
 - Horas y días siempre sin decimales.
 - Aparecen TODOS los trabajadores del reporte (con o sin horas extra / atrasos).
 - Varias Obras lleva además Técnico Obra y Obra.
@@ -58,12 +61,13 @@ una columna por día con horas extra, y después (en este orden):
   explica por qué el Coste/Hora es mayor que Sal. Dia / 8.
 - Resumen: Obra | Trabajadores | Trab. con HE | Coste dias quincena (ordinario de
   TODOS los trabajadores) | Coste H. Extra | Total H. Extra | % s/Total
-  (= HE / (Dias + HE)) | Coste atrasos | Coste Total (Dias + HE + Atrasos).
+  (= HE / (Dias + HE)) | Coste atrasos | A pagar H.E. + Atrasos |
+  Coste Total (Dias + HE + Atrasos).
   Enlazado por fórmula con los totales de cada hoja.
 - Alertas configurables desde el botón Ajustes (por defecto: >5 h en un día y 20 %).
 - Hojas: todos los días de la quincena, con día de la semana ("Vie 18/09"); domingos y
   festivos en gris (domingo, festivo fijo de RD o algún "2" ese día en el .xlsm).
-- Solo las cabeceras naranjas (totales) llevan nota explicativa (NOTAS / NOTAS_RESUMEN).
+- Solo las cabeceras de pagos/totales llevan nota explicativa (NOTAS / NOTAS_RESUMEN).
   Sin hoja de Leyenda ni de Pendiente de pago (descartadas por el usuario).
 - Resumen con título de la quincena (p. ej. "2Q Septiembre 2026"), sin subtítulo; la
   quincena es la del mes del día central del periodo (1Q si día <= 15).
