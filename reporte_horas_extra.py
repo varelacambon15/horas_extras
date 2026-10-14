@@ -5,7 +5,7 @@ con una hoja Resumen y una hoja por reporte.
 
 Columnas de cada hoja: Trabajador, Ajustero, Supervisor/Tecnico, Oficio, Sal. Dia,
 Coste/Hora, horas extra por dia (una col por dia), Dias quincena trabajados (reales),
-Dias dobles, Coste dias / ajuste (ordinario, de la plantilla), Coste H. Extra,
+Domingos / Festivos (dias pagados doble), Coste dias / ajuste (ordinario, de la plantilla), Coste H. Extra,
 Total H. Extra, % H. Extra, Coste total quincena (= ordinario + coste total),
 Dias atrasados y Horas extras atrasadas (cantidades a mano), Otros (ATRASOS/OTROS
 de la plantilla), Total atrasos, coste total (H. Extra + atrasos) y comentarios.
@@ -43,6 +43,8 @@ except ImportError:
         from tkinterdnd2 import TkinterDnD, DND_FILES
     except Exception:
         TkinterDnD, DND_FILES = None, None
+except Exception:
+    TkinterDnD, DND_FILES = None, None
 
 
 # ---------------------------------------------------------------------------
@@ -121,11 +123,6 @@ def _worker(nombre, ajustero, tecnico, supervisor, oficio, obra, sal_dia, coste_
         'COSTE H. EXTRA': total_e * coste_hora,
         '_days':          days,
     }
-
-
-def _incluir(w):
-    """En las hojas solo aparecen trabajadores con horas extra o con atrasos."""
-    return w['TOTAL H. EXTRA'] > 0 or w['ATRASOS'] != 0
 
 
 def _es_codigo_obra(v):
@@ -231,7 +228,7 @@ def _read_formato_diario(path):
 def read_varias_obras(path):
     """Devuelve: (nombre_hoja, workers, coste_dias_obra, total_trabajadores)"""
     todos, total_obra = _read_formato_diario(path)
-    return ('Varias Obras', [w for w in todos if _incluir(w)], float(total_obra), len(todos))
+    return ('Varias Obras', todos, float(total_obra), len(todos))
 
 
 def read_obra_xlsm(path, sheet_name):
@@ -244,7 +241,7 @@ def read_obra_xlsm(path, sheet_name):
         todos, total_obra = _read_formato_diario(path)
         for w in todos:
             w['OBRA'] = ''
-        return (sheet_name, [w for w in todos if _incluir(w)], float(total_obra), len(todos))
+        return (sheet_name, todos, float(total_obra), len(todos))
 
     df = pd.read_excel(path, header=3, sheet_name='Reporte')
     df.columns = [_norm(c) for c in df.columns]
@@ -320,7 +317,7 @@ def read_obra_xlsm(path, sheet_name):
         ))
 
     total_obra = sum(w['COSTE DIAS'] for w in workers)
-    return (sheet_name, [w for w in workers if _incluir(w)], float(total_obra), len(workers))
+    return (sheet_name, workers, float(total_obra), len(workers))
 
 
 def detect_obra_code(path):
@@ -336,6 +333,7 @@ def detect_obra_code(path):
 
 # Paleta azul — visualmente intuitiva, accesible para consulta rapida
 HDR_BG   = "1F4E79"   # azul oscuro (cabecera)
+TOTAL_BG = "E26B0A"   # naranja: cabecera de las columnas que suman totales
 HDR_FG   = "FFFFFF"
 DAY_BG   = "BDD7EE"   # azul claro para cols de dias
 TOT_BG   = "9DC3E6"   # azul medio para fila total
@@ -359,6 +357,7 @@ def _brd_row():
 
 def _hdr_font():  return Font(name='Calibri', bold=True, color=HDR_FG, size=10)
 def _hdr_fill():  return PatternFill('solid', start_color=HDR_BG)
+def _total_hdr_fill(): return PatternFill('solid', start_color=TOTAL_BG)
 def _day_fill():  return PatternFill('solid', start_color=DAY_BG)
 def _tot_fill():  return PatternFill('solid', start_color=TOT_BG)
 def _cen():       return Alignment(horizontal='center', vertical='center')
@@ -377,7 +376,7 @@ LABELS = {
     'SAL. DIA':       'Sal. Dia',
     'COSTE HORA':     'Coste/Hora',
     'DIAS':           'Dias quincena trabajados',
-    'DIAS DOBLES':    'Dias dobles',
+    'DIAS DOBLES':    'Domingos / Festivos',
     'COSTE DIAS':     'Coste dias / ajuste',
     'COSTE H. EXTRA': 'Coste H. Extra',
     'TOTAL H. EXTRA': 'Total H. Extra',
@@ -387,18 +386,21 @@ LABELS = {
     'HORAS ATR':      'Horas extras atrasadas',
     'ATRASOS':        'Otros',
     'TOTAL ATR':      'Total atrasos',
-    'COSTE FINAL':    'coste total',
+    'COSTE FINAL':    'Coste Total',
     'COMENTARIOS':    'comentarios',
 }
 
 COL_WIDTHS = {
     'TRABAJADOR': 30, 'AJUSTERO': 26, 'TECNICO': 18, 'SUPERVISOR': 20, 'OFICIO': 14,
-    'OBRA': 14, 'SAL. DIA': 10, 'COSTE HORA': 11, 'DIAS': 25, 'DIAS DOBLES': 12,
+    'OBRA': 14, 'SAL. DIA': 10, 'COSTE HORA': 11, 'DIAS': 25, 'DIAS DOBLES': 20,
     'COSTE DIAS': 22,
     'COSTE H. EXTRA': 14, 'TOTAL H. EXTRA': 13, '% H. EXTRA': 12, 'COSTE TOTAL': 20,
     'DIAS ATR': 14, 'HORAS ATR': 21, 'ATRASOS': 16, 'TOTAL ATR': 16,
     'COSTE FINAL': 18, 'COMENTARIOS': 45,
 }
+
+# Columnas que reunen totales: cabecera en naranja para distinguirlas
+TOTAL_HDR_COLS = ('COSTE TOTAL', 'TOTAL ATR', 'COSTE FINAL')
 
 # Columnas que llevan SUM en la fila de totales
 SUM_COLS = ('DIAS', 'DIAS DOBLES', 'COSTE DIAS', 'COSTE H. EXTRA', 'TOTAL H. EXTRA',
@@ -419,7 +421,7 @@ def write_sheet(wb, sheet_name, workers):
     ws = wb.create_sheet(title=sheet_name[:31])
 
     if not workers:
-        ws['A1'] = 'Sin trabajadores con horas extra ni atrasos'
+        ws['A1'] = 'Sin trabajadores en el reporte'
         return None, {}
 
     all_days = sorted({d for w in workers for d in w['_days']}, key=_fecha_key)
@@ -460,7 +462,7 @@ def write_sheet(wb, sheet_name, workers):
             c.fill = _day_fill()
             c.font = Font(name='Calibri', bold=True, color=HDR_BG, size=9)
         else:
-            c.fill = _hdr_fill()
+            c.fill = _total_hdr_fill() if col in TOTAL_HDR_COLS else _hdr_fill()
             c.font = _hdr_font()
         c.alignment = _cen()
         c.border    = _brd_outer()
@@ -577,7 +579,8 @@ def build_excel(sheets, output_path):
     for ci, label in enumerate(headers, 1):
         c = ws_r.cell(1, ci, label)
         c.font      = _hdr_font()
-        c.fill      = _hdr_fill()
+        # Coste atrasos y Coste Total reunen totales -> naranja
+        c.fill      = _total_hdr_fill() if ci in (8, 9) else _hdr_fill()
         c.alignment = _cen()
         c.border    = _brd_outer()
     ws_r.row_dimensions[1].height = 18
@@ -655,9 +658,17 @@ def es_reporte_varias(path):
     return 'VARIAS' in os.path.basename(path).upper()
 
 
-class App(TkinterDnD.Tk if TkinterDnD else tk.Tk):
+class App(tk.Tk):
     def __init__(self):
         super().__init__()
+        # Carga la extension nativa de arrastrar y soltar; si falla, solo botones
+        self._dnd = False
+        if TkinterDnD:
+            try:
+                TkinterDnD._require(self)
+                self._dnd = True
+            except Exception:
+                pass
         self.title("Reporte de Horas Extra")
         self.resizable(False, False)
         self.configure(bg="#f0f4f8")
@@ -697,7 +708,7 @@ class App(TkinterDnD.Tk if TkinterDnD else tk.Tk):
 
         self._lbl_empty_varias = tk.Label(self._frame_varias,
             text="Aún no se ha añadido el reporte de Varias Obras."
-                 + (" Puedes arrastrarlo aquí." if TkinterDnD else ""),
+                 + (" Puedes arrastrarlo aquí." if self._dnd else ""),
             font=("Arial", 9, "italic"), bg="#f0f4f8", fg="#888")
         self._lbl_empty_varias.grid(row=0, column=0, pady=4, sticky="w")
 
@@ -722,7 +733,7 @@ class App(TkinterDnD.Tk if TkinterDnD else tk.Tk):
 
         self._lbl_empty_obras = tk.Label(self._frame_obras,
             text="Aún no se ha añadido ningún reporte de obra."
-                 + (" Puedes arrastrarlos aquí." if TkinterDnD else ""),
+                 + (" Puedes arrastrarlos aquí." if self._dnd else ""),
             font=("Arial", 9, "italic"), bg="#f0f4f8", fg="#888")
         self._lbl_empty_obras.grid(row=0, column=0, pady=4, sticky="w")
 
@@ -775,6 +786,7 @@ class App(TkinterDnD.Tk if TkinterDnD else tk.Tk):
                   relief="flat", bg="#f0f4f8", fg="#c00", cursor="hand2",
                   command=on_remove
                   ).grid(row=0, column=3, padx=(6, 0))
+        self._register_drop(row, 'varias' if parent is self._frame_varias else 'obras')
         return row
 
     # ── Acciones: Varias Obras ───────────────────────────────────────────────
@@ -833,13 +845,33 @@ class App(TkinterDnD.Tk if TkinterDnD else tk.Tk):
 
     # ── Arrastrar y soltar ───────────────────────────────────────────────────
     def _setup_dnd(self, sec_varias, sec_obras):
-        """Registra la ventana y las dos secciones como destino de archivos."""
-        if not TkinterDnD:
+        """
+        Registra todos los elementos de la ventana como destino de archivos.
+        Los que estan dentro de una seccion fuerzan el tipo de esa seccion.
+        """
+        tipos = {str(sec_varias): 'varias', str(sec_obras): 'obras'}
+
+        def recorrer(widget, tipo):
+            tipo = tipos.get(str(widget), tipo)
+            self._register_drop(widget, tipo, recursivo=False)
+            for hijo in widget.winfo_children():
+                recorrer(hijo, tipo)
+
+        for hijo in self.winfo_children():
+            recorrer(hijo, None)
+
+    def _register_drop(self, widget, tipo, recursivo=True):
+        """Hace que se puedan soltar archivos sobre el widget (y sus hijos)."""
+        if not self._dnd:
             return
-        destinos = [(self, None), (sec_varias, 'varias'), (sec_obras, 'obras')]
-        for widget, tipo in destinos:
+        try:
             widget.drop_target_register(DND_FILES)
             widget.dnd_bind('<<Drop>>', lambda e, t=tipo: self._on_drop(e, t))
+        except Exception:
+            pass
+        if recursivo:
+            for hijo in widget.winfo_children():
+                self._register_drop(hijo, tipo)
 
     def _on_drop(self, event, tipo):
         """

@@ -34,22 +34,24 @@ Cada hoja de obra: Trabajador, Ajustero, Supervisor, Oficio, Sal. Dia, Coste/Hor
 una columna por día con horas extra, y después:
 
 - Dias quincena trabajados: días REALES (un día marcado 2 cuenta como 1).
-- Dias dobles: días pagados doble (festivo/domingo); se pagan como ordinario.
+- Domingos / Festivos: días pagados doble; se pagan como ordinario.
   En los .xlsm vienen como 2 en ADMIN/AJUSTE; en Varias Obras se deducen del
   importe de COSTE ADMIN (no vienen marcados por día).
 - Coste dias / ajuste: coste ORDINARIO, trasladado de la plantilla (no fórmula).
   .xlsm: COSTE DIAS. Varias Obras: COSTE ADMIN − horas extra + COSTE AJUSTE.
 - Coste H. Extra, Total H. Extra, % H. Extra (= Coste H. Extra / Coste total quincena).
-- Coste total quincena = Coste dias / ajuste + coste total
+- Coste total quincena = Coste dias / ajuste + Coste Total
   (lo que se le carga a la obra de mano de obra; coincide con COSTE TOTAL / IMPORTE TOTAL).
 - Dias atrasados, Horas extras atrasadas: CANTIDADES (días / horas) que se rellenan a mano.
 - Otros: ATRASOS/OTROS trasladado de la plantilla.
 - Total atrasos = Dias atrasados × Sal. Dia + Horas extras atrasadas × Coste/Hora + Otros.
-- coste total = Coste H. Extra + Total atrasos.
+- Coste Total = Coste H. Extra + Total atrasos.
+- Cabeceras en naranja para las columnas de totales: Coste total quincena,
+  Total atrasos, Coste Total (y Coste atrasos / Coste Total en el Resumen).
 - comentarios = OBSERVACIONES.
 
 - Horas y días siempre sin decimales.
-- Solo aparecen trabajadores con horas extra o con atrasos.
+- Aparecen TODOS los trabajadores del reporte (con o sin horas extra / atrasos).
 - Varias Obras lleva además Técnico Obra y Obra.
 - Resumen: Obra | Trabajadores | Trab. con HE | Coste dias quincena (ordinario de
   TODOS los trabajadores) | Coste H. Extra | Total H. Extra | % s/Total
