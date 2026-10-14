@@ -58,7 +58,20 @@ una columna por día con horas extra, y después:
 - Alertas configurables desde el botón Ajustes (por defecto: >5 h en un día y 20 %).
 - Nombre del fichero generado: Reporte_Horas_Extras_Atrasos.xlsx
 
-## Probar sin interfaz
+## Interfaz
 
-En el contenedor no hay Tkinter: para probar `build_excel` hay que simular el módulo
-`tkinter` y llamar a `read_varias_obras` / `read_obra_xlsm` directamente.
+- Los archivos se pueden añadir con los botones o arrastrándolos (tkinterdnd2).
+  Soltados sobre la ventana se clasifican por nombre ("VARIAS" → Varias Obras);
+  soltados sobre una sección van a esa sección.
+- tkinterdnd2 se instala solo con pip si falta (solo ejecutando con Python, no en
+  el .exe). Si no está disponible, el programa funciona igual con los botones.
+- El .exe se genera con PyInstaller (`resource_path` usa `_MEIPASS`); para incluir
+  el arrastrar y soltar hay que añadir `--collect-all tkinterdnd2`.
+
+## Probar
+
+- Sin interfaz: simular el módulo `tkinter` y llamar a `read_varias_obras` /
+  `read_obra_xlsm` y `build_excel` directamente.
+- Con interfaz: el Python por defecto del contenedor no trae Tkinter; usar
+  `/usr/bin/python3.12` (tras `apt-get install python3-tk xvfb`) en un venv con
+  pandas, openpyxl y tkinterdnd2, y ejecutar con `xvfb-run`.

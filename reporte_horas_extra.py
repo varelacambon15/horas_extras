@@ -30,6 +30,21 @@ except ImportError:
     from openpyxl.utils import get_column_letter
 
 
+# Arrastrar y soltar archivos (opcional: si tkinterdnd2 no esta disponible el
+# programa funciona igual con los botones de "Añadir")
+try:
+    from tkinterdnd2 import TkinterDnD, DND_FILES
+except ImportError:
+    try:
+        if getattr(sys, 'frozen', False):
+            raise ImportError("ejecutable sin tkinterdnd2")
+        import subprocess
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "tkinterdnd2"])
+        from tkinterdnd2 import TkinterDnD, DND_FILES
+    except Exception:
+        TkinterDnD, DND_FILES = None, None
+
+
 # ---------------------------------------------------------------------------
 # Configuración de umbrales (editable desde la interfaz, persistida en disco)
 # ---------------------------------------------------------------------------
@@ -633,7 +648,14 @@ def resource_path(filename):
     return os.path.join(base, filename)
 
 
-class App(tk.Tk):
+EXCEL_EXT = ('.xlsx', '.xlsm', '.xls')
+
+def es_reporte_varias(path):
+    """Un reporte de Varias Obras lleva 'VARIAS' en el nombre del fichero."""
+    return 'VARIAS' in os.path.basename(path).upper()
+
+
+class App(TkinterDnD.Tk if TkinterDnD else tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Reporte de Horas Extra")
@@ -674,7 +696,8 @@ class App(tk.Tk):
         self._frame_varias.columnconfigure(0, weight=1)
 
         self._lbl_empty_varias = tk.Label(self._frame_varias,
-            text="Aún no se ha añadido el reporte de Varias Obras.",
+            text="Aún no se ha añadido el reporte de Varias Obras."
+                 + (" Puedes arrastrarlo aquí." if TkinterDnD else ""),
             font=("Arial", 9, "italic"), bg="#f0f4f8", fg="#888")
         self._lbl_empty_varias.grid(row=0, column=0, pady=4, sticky="w")
 
@@ -698,7 +721,8 @@ class App(tk.Tk):
         self._frame_obras.columnconfigure(0, weight=1)
 
         self._lbl_empty_obras = tk.Label(self._frame_obras,
-            text="Aún no se ha añadido ningún reporte de obra.",
+            text="Aún no se ha añadido ningún reporte de obra."
+                 + (" Puedes arrastrarlos aquí." if TkinterDnD else ""),
             font=("Arial", 9, "italic"), bg="#f0f4f8", fg="#888")
         self._lbl_empty_obras.grid(row=0, column=0, pady=4, sticky="w")
 
@@ -731,6 +755,8 @@ class App(tk.Tk):
                                    bg="#f0f4f8", fg="#444")
         self.lbl_status.grid(row=4, column=0, pady=(0, 4))
 
+        self._setup_dnd(sec_varias, sec_obras)
+
     # ── Helper: crear fila visual de reporte cargado ─────────────────────────
     def _make_row(self, parent, label_text, path, on_remove):
         row = tk.Frame(parent, bg="#f0f4f8")
@@ -752,12 +778,15 @@ class App(tk.Tk):
         return row
 
     # ── Acciones: Varias Obras ───────────────────────────────────────────────
-    def _add_varias(self):
-        p = filedialog.askopenfilename(
-            title="Selecciona el reporte de Varias Obras",
-            filetypes=[("Excel", "*.xlsx *.xlsm *.xls")])
+    def _add_varias(self, p=None):
+        if p is None:
+            p = filedialog.askopenfilename(
+                title="Selecciona el reporte de Varias Obras",
+                filetypes=[("Excel", "*.xlsx *.xlsm *.xls")])
         if not p:
             return
+        if self._varias_path:
+            self._remove_varias()
         self._varias_path = p
         if self._lbl_empty_varias.winfo_exists():
             self._lbl_empty_varias.grid_remove()
@@ -780,10 +809,11 @@ class App(tk.Tk):
         self.geometry("")
 
     # ── Acciones: Reportes de obra (multiselección) ──────────────────────────
-    def _add_obras(self):
-        paths = filedialog.askopenfilenames(
-            title="Selecciona uno o varios reportes de obra",
-            filetypes=[("Excel", "*.xlsx *.xlsm *.xls")])
+    def _add_obras(self, paths=None):
+        if paths is None:
+            paths = filedialog.askopenfilenames(
+                title="Selecciona uno o varios reportes de obra",
+                filetypes=[("Excel", "*.xlsx *.xlsm *.xls")])
         if not paths:
             return
         if self._lbl_empty_obras.winfo_exists():
@@ -800,6 +830,46 @@ class App(tk.Tk):
             self._obras.append((p, sheet_label, row))
         self.update_idletasks()
         self.geometry("")
+
+    # ── Arrastrar y soltar ───────────────────────────────────────────────────
+    def _setup_dnd(self, sec_varias, sec_obras):
+        """Registra la ventana y las dos secciones como destino de archivos."""
+        if not TkinterDnD:
+            return
+        destinos = [(self, None), (sec_varias, 'varias'), (sec_obras, 'obras')]
+        for widget, tipo in destinos:
+            widget.drop_target_register(DND_FILES)
+            widget.dnd_bind('<<Drop>>', lambda e, t=tipo: self._on_drop(e, t))
+
+    def _on_drop(self, event, tipo):
+        """
+        Archivos soltados. Sobre una seccion van a esa seccion; sobre el resto
+        de la ventana se clasifican por nombre (VARIAS -> Varias Obras).
+        """
+        paths   = [p for p in self.tk.splitlist(event.data)]
+        excels  = [p for p in paths if p.lower().endswith(EXCEL_EXT)]
+        ignored = len(paths) - len(excels)
+
+        if tipo == 'varias':
+            varias, obras = excels[:1], []
+            ignored += len(excels[1:])
+        elif tipo == 'obras':
+            varias, obras = [], excels
+        else:
+            varias = [p for p in excels if es_reporte_varias(p)]
+            obras  = [p for p in excels if not es_reporte_varias(p)]
+            ignored += len(varias[1:])
+            varias = varias[:1]
+
+        if varias:
+            self._add_varias(varias[0])
+        if obras:
+            self._add_obras(obras)
+        if ignored:
+            self.lbl_status.config(
+                text=f"Se han ignorado {ignored} archivo(s): solo se admite Excel "
+                     f"y un único reporte de Varias Obras.", fg="#a05a00")
+        return event.action
 
     def _remove_obra(self, path):
         for i, (p, _, frame) in enumerate(self._obras):
