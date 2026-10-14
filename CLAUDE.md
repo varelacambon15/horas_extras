@@ -57,7 +57,9 @@ una columna por día con horas extra, y después (en este orden):
   atrasos y A pagar H.E. + Atrasos, cabecera LILA); Coste total quincena = 1º + 2º (NEGRO).
   Mismos colores en el Resumen. Estas cabeceras llevan nota explicando el proceso.
 - Horas y días siempre sin decimales.
-- Aparecen TODOS los trabajadores del reporte (con o sin horas extra / atrasos).
+- Aparecen todos los trabajadores del reporte, salvo quien no genera ningún coste (sin días,
+  sin coste días, sin horas extra y sin atrasos): `genera_coste`. Quien no trabajó pero
+  tiene atrasos SÍ aparece.
 - Varias Obras lleva además Técnico Obra y Obra.
 - Complemento / día (GRATIFICACIONES del .xlsm) justo después de Sal. Dia, solo si alguien la tiene;
   explica por qué el Coste/Hora es mayor que Sal. Dia / 8.

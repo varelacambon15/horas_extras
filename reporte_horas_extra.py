@@ -273,6 +273,16 @@ def _worker(nombre, ajustero, tecnico, supervisor, oficio, obra, sal_dia, coste_
     }
 
 
+def genera_coste(w):
+    """
+    False para quien no ha trabajado ningun dia ni genera ningun coste en la
+    quincena (sin dias, sin coste ordinario, sin horas extra y sin atrasos):
+    esas filas se omiten. Quien no trabajo pero tiene atrasos se mantiene.
+    """
+    return bool(w.get('DIAS') or w.get('COSTE DIAS') or w.get('TOTAL H. EXTRA')
+                or w.get('ATRASOS') or w.get('DIAS ATR') or w.get('HORAS ATR'))
+
+
 def _es_codigo_obra(v):
     try:
         return 10000 <= int(v) <= 99999
@@ -371,6 +381,7 @@ def _read_formato_diario(path):
         ))
 
     info = {'fechas': [b['fecha'] for b in day_blocks], 'festivos': set()}
+    workers = [w for w in workers if genera_coste(w)]
     return workers, sum(w['COSTE DIAS'] for w in workers), info
 
 
@@ -470,6 +481,7 @@ def read_obra_xlsm(path, sheet_name):
             days        = day_hours,
         ))
 
+    workers    = [w for w in workers if genera_coste(w)]
     total_obra = sum(w['COSTE DIAS'] for w in workers)
     info = {'fechas': sorted(set(dias_per_col.values()) | set(date_per_col.values()), key=_fecha_key),
             'festivos': festivos}
