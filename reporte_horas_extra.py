@@ -7,7 +7,7 @@ Columnas de cada hoja: Trabajador, Ajustero, Supervisor/Tecnico, Oficio, Sal. Di
 Coste/Hora, horas extra por dia (una col por dia), Dias quincena trabajados (reales),
 Dias dobles, Coste dias / ajuste (ordinario, de la plantilla), Coste H. Extra,
 Total H. Extra, % H. Extra, Coste total quincena (= ordinario + coste total),
-Dias atrasados y Horas extras atrasadas (importes a mano), Otros (ATRASOS/OTROS
+Dias atrasados y Horas extras atrasadas (cantidades a mano), Otros (ATRASOS/OTROS
 de la plantilla), Total atrasos, coste total (H. Extra + atrasos) y comentarios.
 """
 
@@ -390,10 +390,10 @@ SUM_COLS = ('DIAS', 'DIAS DOBLES', 'COSTE DIAS', 'COSTE H. EXTRA', 'TOTAL H. EXT
             'COSTE TOTAL', 'DIAS ATR', 'HORAS ATR', 'ATRASOS', 'TOTAL ATR', 'COSTE FINAL')
 
 # Columnas de importes en formato contable (vacias o cero se ven como "-")
-ACCT_COLS = ('COSTE DIAS', 'DIAS ATR', 'HORAS ATR', 'ATRASOS', 'TOTAL ATR', 'COSTE FINAL')
+ACCT_COLS = ('COSTE DIAS', 'ATRASOS', 'TOTAL ATR', 'COSTE FINAL')
 
 # Columnas de horas / dias (sin formato decimal)
-NUM_COLS = ('DIAS', 'DIAS DOBLES', 'TOTAL H. EXTRA')
+NUM_COLS = ('DIAS', 'DIAS DOBLES', 'TOTAL H. EXTRA', 'DIAS ATR', 'HORAS ATR')
 
 
 def write_sheet(wb, sheet_name, workers):
@@ -460,14 +460,17 @@ def write_sheet(wb, sheet_name, workers):
         es_alerta   = w['TOTAL H. EXTRA'] > umbral_h or (pct_extra > umbral_pct and pct_extra > 0)
 
         # Coste dias / ajuste y Otros (ATRASOS/OTROS) se trasladan tal cual de
-        # la plantilla; Dias atrasados y Horas extras atrasadas son importes que
-        # se rellenan a mano. Coste total quincena = coste ordinario + coste total.
+        # la plantilla; Dias atrasados y Horas extras atrasadas son cantidades
+        # (dias / horas) que se rellenan a mano y se valoran a Sal. Dia y Coste/Hora.
+        # Coste total quincena = coste ordinario + coste total.
         formulas = {
             'COSTE H. EXTRA': f"={L['TOTAL H. EXTRA']}{r}*{L['COSTE HORA']}{r}",
             'TOTAL H. EXTRA': f"=SUM({first_day}{r}:{last_day}{r})" if all_days else 0,
             '% H. EXTRA':     f"=IFERROR({L['COSTE H. EXTRA']}{r}/{L['COSTE TOTAL']}{r},0)",
             'COSTE TOTAL':    f"={L['COSTE DIAS']}{r}+{L['COSTE FINAL']}{r}",
-            'TOTAL ATR':      f"=N({L['DIAS ATR']}{r})+N({L['HORAS ATR']}{r})+N({L['ATRASOS']}{r})",
+            'TOTAL ATR':      (f"=N({L['DIAS ATR']}{r})*{L['SAL. DIA']}{r}"
+                               f"+N({L['HORAS ATR']}{r})*{L['COSTE HORA']}{r}"
+                               f"+N({L['ATRASOS']}{r})"),
             'COSTE FINAL':    f"=N({L['COSTE H. EXTRA']}{r})+N({L['TOTAL ATR']}{r})",
         }
 

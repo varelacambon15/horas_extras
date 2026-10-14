@@ -42,9 +42,9 @@ una columna por día con horas extra, y después:
 - Coste H. Extra, Total H. Extra, % H. Extra (= Coste H. Extra / Coste total quincena).
 - Coste total quincena = Coste dias / ajuste + coste total
   (lo que se le carga a la obra de mano de obra; coincide con COSTE TOTAL / IMPORTE TOTAL).
-- Dias atrasados, Horas extras atrasadas: IMPORTES que se rellenan a mano (vacíos).
+- Dias atrasados, Horas extras atrasadas: CANTIDADES (días / horas) que se rellenan a mano.
 - Otros: ATRASOS/OTROS trasladado de la plantilla.
-- Total atrasos = Dias atrasados + Horas extras atrasadas + Otros.
+- Total atrasos = Dias atrasados × Sal. Dia + Horas extras atrasadas × Coste/Hora + Otros.
 - coste total = Coste H. Extra + Total atrasos.
 - comentarios = OBSERVACIONES.
 
