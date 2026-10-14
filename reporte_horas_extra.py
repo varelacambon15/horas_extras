@@ -13,7 +13,7 @@ Coste total quincena (= dias + H. Extra + atrasos) y comentarios.
 """
 
 import sys, re, json, os
-from datetime import datetime, date
+from datetime import datetime
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
@@ -450,47 +450,23 @@ LABELS = {
     'COMENTARIOS':    'comentarios',
 }
 
-# Explicacion de cada columna: nota en la cabecera y hoja Leyenda
+# Nota en la cabecera de las columnas de totales (naranja)
 NOTAS = {
-    'TRABAJADOR':     'Nombre del trabajador (OPERARIOS del reporte).',
-    'AJUSTERO':       'Ajustero responsable del trabajador (AJUSTERO del reporte).',
-    'TECNICO':        'Técnico de obra (TECNICO OBRA del reporte de Varias Obras).',
-    'SUPERVISOR':     'Supervisor (SUPERVISOR del reporte de obra).',
-    'OFICIO':         'Oficio del trabajador.',
-    'OBRA':           'Obras donde más horas ha trabajado en la quincena (máximo 2).',
-    'SAL. DIA':       'Salario diario, del reporte.',
-    'COSTE HORA':     'Coste de una hora extra, del reporte.',
-    '_DIA':           'Horas extra hechas ese día. Columnas en gris: domingo o festivo.',
-    'DIAS':           'Días realmente trabajados en la quincena. Un domingo o festivo '
-                      'pagado doble cuenta como 1 día.',
-    'DIAS DOBLES':    'Domingos o festivos trabajados, que se pagan doble. Su importe ya '
-                      'está incluido en Coste días / ajuste.',
     'COSTE DIAS':     'Coste ordinario de la quincena (días + ajuste), copiado del reporte. '
                       'No incluye horas extra ni atrasos.',
-    'TOTAL H. EXTRA': 'Suma de las horas extra de todos los días.',
-    '% H. EXTRA':     'Peso de las horas extra en lo generado: '
-                      'Coste H. Extra / (Coste días / ajuste + Coste H. Extra).',
     'COSTE H. EXTRA': 'Total H. Extra × Coste/Hora.',
-    'DIAS ATR':       'Días atrasados de quincenas anteriores (se rellena a mano). '
-                      'Se pagan a Sal. Dia.',
-    'HORAS ATR':      'Horas extra atrasadas de quincenas anteriores (se rellena a mano). '
-                      'Se pagan a Coste/Hora.',
-    'ATRASOS':        'Importe de ATRASOS/OTROS del reporte (atrasos y ajustes ya '
-                      'calculados por la obra).',
     'TOTAL ATR':      'Dias atrasados × Sal. Dia + Horas extras atrasadas × Coste/Hora + Otros.',
     'COSTE TOTAL':    'Coste dias / ajuste + Coste H. Extra + Total atrasos. '
                       'Es lo que se carga a la obra por este trabajador.',
-    'COMENTARIOS':    'Observaciones del reporte.',
 }
 
+RESUMEN_HEADERS = ['Obra', 'Trabajadores', 'Trab. con HE', 'Coste dias quincena',
+                   'Coste H. Extra', 'Total H. Extra', '% s/Total', 'Coste atrasos',
+                   'Coste Total (Dias + HE + Atrasos)']
+
 NOTAS_RESUMEN = {
-    'Obra':                 'Reporte de origen: Varias Obras o código de la obra.',
-    'Trabajadores':         'Todas las personas del reporte.',
-    'Trab. con HE':         'Personas con alguna hora extra en la quincena.',
     'Coste dias quincena':  'Coste ordinario (días + ajuste) de todas las personas del reporte.',
     'Coste H. Extra':       'Suma de Coste H. Extra de la hoja de la obra.',
-    'Total H. Extra':       'Suma de horas extra de la hoja de la obra.',
-    '% s/Total':            'Coste H. Extra / (Coste dias quincena + Coste H. Extra).',
     'Coste atrasos':        'Suma de Total atrasos de la hoja de la obra.',
     'Coste Total (Dias + HE + Atrasos)':
                             'Coste dias quincena + Coste H. Extra + Coste atrasos. '
@@ -585,10 +561,9 @@ def write_sheet(wb, sheet_name, workers, info=None):
             c = ws.cell(1, ci, etiqueta_dia(col))
             c.fill = PatternFill('solid', start_color=DOM_HDR) if col in festivos else _day_fill()
             c.font = Font(name='Calibri', bold=True, color=HDR_BG, size=9)
-            c.comment = _nota(f"{col}. " + NOTAS['_DIA'])
         else:
             c = ws.cell(1, ci, LABELS.get(col, col))
-            if col in NOTAS:
+            if col in NOTAS:            # solo columnas de totales (naranja)
                 c.comment = _nota(NOTAS[col])
             c.fill = _total_hdr_fill() if col in TOTAL_HDR_COLS else _hdr_fill()
             c.font = _hdr_font()
@@ -700,86 +675,6 @@ def periodo_de(sheets):
                                         datetime.strptime(p[2], '%d/%m/%Y')))
 
 
-def write_leyenda(wb, periodo):
-    """Hoja que explica de donde sale cada columna y que significa cada color."""
-    ws = wb.create_sheet('Leyenda', 1)
-    ws.column_dimensions['A'].width = 28
-    ws.column_dimensions['B'].width = 95
-    r = 1
-
-    def titulo(texto, size=14):
-        nonlocal r
-        c = ws.cell(r, 1, texto)
-        c.font = Font(name='Calibri', bold=True, size=size, color=HDR_BG)
-        r += 1
-
-    def cabecera(a, b):
-        nonlocal r
-        for ci, t in enumerate((a, b), 1):
-            c = ws.cell(r, ci, t)
-            c.font, c.fill, c.border = _hdr_font(), _hdr_fill(), _brd_outer()
-        r += 1
-
-    def fila(a, b, fill=None, font_color='000000', bold=False):
-        nonlocal r
-        ca = ws.cell(r, 1, a)
-        cb = ws.cell(r, 2, b)
-        ca.font = Font(name='Calibri', size=10, bold=True, color=font_color)
-        cb.font = Font(name='Calibri', size=10, bold=bold)
-        cb.alignment = Alignment(wrap_text=True, vertical='center')
-        ca.alignment = Alignment(vertical='center')
-        for c in (ca, cb):
-            c.border = _brd_row()
-        if fill:
-            ca.fill = PatternFill('solid', start_color=fill)
-        r += 1
-
-    titulo('Cómo leer este informe', 16)
-    if periodo:
-        ws.cell(r, 1, f'Quincena: {periodo[0]}  ·  del {periodo[1]} al {periodo[2]}').font = \
-            Font(name='Calibri', size=11, italic=True)
-        r += 1
-    ws.cell(r, 1, 'Todas las cantidades están en pesos dominicanos (RD$).').font = \
-        Font(name='Calibri', size=10, italic=True)
-    r += 2
-
-    titulo('Hojas de cada obra', 12)
-    cabecera('Columna', 'Qué es y de dónde sale')
-    orden = ['TRABAJADOR', 'AJUSTERO', 'SUPERVISOR', 'TECNICO', 'OFICIO', 'OBRA', 'SAL. DIA',
-             'COSTE HORA', '_DIA', 'DIAS', 'DIAS DOBLES', 'COSTE DIAS', 'TOTAL H. EXTRA',
-             '% H. EXTRA', 'COSTE H. EXTRA', 'DIAS ATR', 'HORAS ATR', 'ATRASOS', 'TOTAL ATR',
-             'COSTE TOTAL', 'COMENTARIOS']
-    for key in orden:
-        nombre = 'Días (Lun 01/09 …)' if key == '_DIA' else LABELS[key]
-        fila(nombre, NOTAS[key], fill=TOTAL_BG if key in TOTAL_HDR_COLS else None,
-             font_color=HDR_FG if key in TOTAL_HDR_COLS else '000000')
-    fila('Fila Total', 'Suma de cada columna. El % es el de la obra completa.')
-    r += 1
-
-    titulo('Hoja Resumen', 12)
-    cabecera('Columna', 'Qué es y de dónde sale')
-    for nombre, texto in NOTAS_RESUMEN.items():
-        es_total = nombre in ('Coste dias quincena', 'Coste H. Extra', 'Coste atrasos',
-                              'Coste Total (Dias + HE + Atrasos)')
-        fila(nombre, texto, fill=TOTAL_BG if es_total else None,
-             font_color=HDR_FG if es_total else '000000')
-    r += 1
-
-    titulo('Colores y avisos', 12)
-    cabecera('Color', 'Significado')
-    fila('Cabecera naranja', 'Columna de costes / totales.', fill=TOTAL_BG, font_color=HDR_FG)
-    fila('Día en gris', 'Domingo o festivo.', fill=DOM_HDR)
-    fila(f'Número rojo en un día', f'Más de {CONFIG_HORAS_DIA_ALERTA} horas extra en un solo día.',
-         font_color=ALERT_FG)
-    fila('Fila en rojo', 'Trabajador con horas extra muy por encima de la media de su obra '
-         f'(más de 2,3 veces la media y 25 h por encima) o con un % H. Extra alto '
-         f'(más de 1,5 veces el % medio, 10 puntos por encima y nunca menos del '
-         f'{int(round(CONFIG_PORCENTAJE_MINIMO * 100))} %).', font_color=ALERT_FG)
-    fila('"-" en un importe', 'Cero.')
-    fila('Nota en la cabecera', 'Al pasar el ratón por una cabecera se ve esta misma explicación.')
-    ws.freeze_panes = 'A2'
-
-
 def build_excel(sheets, output_path):
     """sheets es lista de (sheet_name, workers, coste_dias_obra, total_trabajadores, info)."""
     wb = Workbook()
@@ -795,21 +690,16 @@ def build_excel(sheets, output_path):
     # rellenar atrasos a mano el resumen se actualiza solo.
     ws_r = wb.create_sheet('Resumen', 0)
 
-    headers = list(NOTAS_RESUMEN)
+    headers = RESUMEN_HEADERS
     n_cols  = len(headers)
     last_cl = get_column_letter(n_cols)
 
     t = ws_r.cell(1, 1, 'Reporte de Horas Extra y Atrasos' + (f' · {periodo[0]}' if periodo else ''))
     t.font = Font(name='Calibri', bold=True, size=14, color=HDR_BG)
     ws_r.merge_cells(f'A1:{last_cl}1')
-    sub = (f'Del {periodo[1]} al {periodo[2]}  ·  ' if periodo else '') + \
-          f'Generado el {date.today().strftime("%d/%m/%Y")}  ·  Importes en RD$  ·  ' \
-          'Ver la hoja Leyenda para el significado de cada columna'
-    ws_r.cell(2, 1, sub).font = Font(name='Calibri', size=10, italic=True, color='595959')
-    ws_r.merge_cells(f'A2:{last_cl}2')
     ws_r.row_dimensions[1].height = 22
 
-    HR = 4                      # fila de cabecera de la tabla
+    HR = 3                      # fila de cabecera de la tabla
     for ci, label in enumerate(headers, 1):
         c = ws_r.cell(HR, ci, label)
         c.font      = _hdr_font()
@@ -817,7 +707,8 @@ def build_excel(sheets, output_path):
         c.fill      = _total_hdr_fill() if ci in (4, 5, 8, 9) else _hdr_fill()
         c.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
         c.border    = _brd_outer()
-        c.comment   = _nota(NOTAS_RESUMEN[label])
+        if label in NOTAS_RESUMEN:      # solo columnas de totales (naranja)
+            c.comment = _nota(NOTAS_RESUMEN[label])
     ws_r.row_dimensions[HR].height = 30
 
     money_cols = (4, 5, 8, 9)
@@ -870,7 +761,6 @@ def build_excel(sheets, output_path):
     ws_r.auto_filter.ref = f"A{HR}:{last_cl}{tr-1}"
     ws_r.freeze_panes = f'A{HR + 1}'
 
-    write_leyenda(wb, periodo)
     wb.save(output_path)
 
 

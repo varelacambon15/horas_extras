@@ -61,9 +61,9 @@ una columna por día con horas extra, y después (en este orden):
 - Alertas configurables desde el botón Ajustes (por defecto: >5 h en un día y 20 %).
 - Hojas: todos los días de la quincena, con día de la semana ("Vie 18/09"); domingos y
   festivos en gris (domingo, festivo fijo de RD o algún "2" ese día en el .xlsm).
-- Cada cabecera lleva una nota con su explicación (diccionarios NOTAS / NOTAS_RESUMEN),
-  y la hoja "Leyenda" explica columnas y colores.
-- Resumen con título de la quincena (p. ej. "2Q Septiembre 2026") y fechas; la
+- Solo las cabeceras naranjas (totales) llevan nota explicativa (NOTAS / NOTAS_RESUMEN).
+  Sin hoja de Leyenda ni de Pendiente de pago (descartadas por el usuario).
+- Resumen con título de la quincena (p. ej. "2Q Septiembre 2026"), sin subtítulo; la
   quincena es la del mes del día central del periodo (1Q si día <= 15).
 - Nombre del fichero generado: Reporte_Horas_Extras_Atrasos_<quincena>.xlsx
   (los reportes se leen antes de pedir dónde guardar).
