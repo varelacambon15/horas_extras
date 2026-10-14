@@ -586,6 +586,7 @@ TOTALQ_BG = "000000"  # negro: coste total de la quincena (1er + 2o pago)
 DOM_HDR  = "A6A6A6"   # gris: cabecera de domingos y festivos
 DOM_BG   = "EDEDED"   # gris claro: celdas de domingos y festivos
 REVISAR_BG = "FFE699" # ambar: importe de Otros que el comentario no explica
+APAGAR_TOT = "CCC0DA" # lila claro: total de "A pagar H.E. + Atrasos"
 HDR_FG   = "FFFFFF"
 DAY_BG   = "BDD7EE"   # azul claro para cols de dias
 TOT_BG   = "9DC3E6"   # azul medio para fila total
@@ -599,6 +600,11 @@ FMT_PCT   = '0.0%'
 def _brd_outer():
     """Borde exterior completo."""
     s = Side(style='thin', color='999999')
+    return Border(left=s, right=s, top=s, bottom=s)
+
+def _brd_negro():
+    """Borde negro completo (totales de pagos)."""
+    s = Side(style='thin', color='000000')
     return Border(left=s, right=s, top=s, bottom=s)
 
 def _brd_row():
@@ -867,6 +873,12 @@ def write_sheet(wb, sheet_name, workers, info=None):
         c.border    = _brd_outer()
         c.alignment = _left() if ci == 1 else _cen()
         cl = L[col]
+        # Totales de pagos (de Coste dias / ajuste a Coste total quincena) con borde
+        # negro; el total a pagar (2o pago) en lila claro
+        if ci >= all_cols.index('COSTE DIAS') + 1 and ci <= all_cols.index('COSTE TOTAL') + 1:
+            c.border = _brd_negro()
+        if col == 'A PAGAR':
+            c.fill = PatternFill('solid', start_color=APAGAR_TOT)
         if ci == 1:
             c.value = 'Total'
         elif col in all_days or col in SUM_COLS:
@@ -978,6 +990,10 @@ def build_excel(sheets, output_path):
         c.border    = _brd_outer()
         c.alignment = _left() if ci == 1 else _cen()
         cl = get_column_letter(ci)
+        if ci >= 4:                                  # totales de pagos: borde negro
+            c.border = _brd_negro()
+        if headers[ci - 1] == 'A pagar H.E. + Atrasos':
+            c.fill = PatternFill('solid', start_color=APAGAR_TOT)
         if ci == 1:
             c.value = 'Total'
         elif ci == 7:

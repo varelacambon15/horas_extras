@@ -60,6 +60,7 @@ una columna por día con horas extra, y después (en este orden):
   NARANJA); 2º pago = horas extra y atrasos cuando se autorizan (Coste H. Extra, Total
   atrasos y A pagar H.E. + Atrasos, cabecera LILA); Coste total quincena = 1º + 2º (NEGRO).
   Mismos colores en el Resumen. Estas cabeceras llevan nota explicando el proceso.
+  Fila Total: borde negro en las columnas de pagos y el total de A pagar en lila claro.
 - Horas y días siempre sin decimales.
 - Aparecen todos los trabajadores del reporte, salvo quien no genera ningún coste (sin días,
   sin coste días, sin horas extra y sin atrasos): `genera_coste`. Quien no trabajó pero
